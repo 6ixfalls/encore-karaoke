@@ -1723,9 +1723,9 @@ export class FortePlayback {
       this.audioPitchNode = null;
     }
 
-    if (this.state.playback.isMidi) {
-      this.setTranspose(0);
+    this.setTranspose(0);
 
+    if (this.state.playback.isMidi) {
       if (this.state.playback.hasChorus && this.chorusElement) {
         this.chorusElement.pause();
         this.chorusElement.currentTime = 0;
