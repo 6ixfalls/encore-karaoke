@@ -718,7 +718,7 @@ export class ForteSynthesizer {
     this.sendExternalMidiMessage(gm2MasterCoarseTune);
 
     logVerbose(
-      `[FORTE SVC] Sent external transpose: ${clamped > 0 ? "+" : ""}${clamped} semitones.`,
+      `Sent external transpose: ${clamped > 0 ? "+" : ""}${clamped} semitones.`,
     );
   }
 
