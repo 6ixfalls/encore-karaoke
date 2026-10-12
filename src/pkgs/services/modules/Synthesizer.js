@@ -769,7 +769,7 @@ export class ForteSynthesizer {
     this.sendExternalMidiMessage(yamahaXgMasterVolume);
 
     logVerbose(
-      `[FORTE SVC] Sent external master volume: ${Math.round(clamped * 100)}% (${val7}/127)`,
+      `Sent external master volume: ${Math.round(clamped * 100)}% (${val7}/127)`,
     );
   }
 
