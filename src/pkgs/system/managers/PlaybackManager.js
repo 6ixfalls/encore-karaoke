@@ -930,7 +930,8 @@ export default class PlaybackManager {
         }
         if (!playedNarration) {
           let defaultNarrationUrl = "/assets/audio/scores/0.wav";
-          if (s >= 70) defaultNarrationUrl = "/assets/audio/scores/70.wav";
+          if (s >= 100) defaultNarrationUrl = "/assets/audio/scores/100.wav";
+          else if (s >= 70) defaultNarrationUrl = "/assets/audio/scores/70.wav";
           else if (s >= 50) defaultNarrationUrl = "/assets/audio/scores/50.wav";
           else if (s >= 20) defaultNarrationUrl = "/assets/audio/scores/20.wav";
           await Forte.playSfx(defaultNarrationUrl);
