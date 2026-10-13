@@ -121,6 +121,8 @@ export interface LibraryManifest {
   additionalContents?: {
     bgvCategories?: string[];
     bumperImages?: string[];
+    soundFont?: string;
+    bootVideo?: string;
   };
   [key: string]: unknown;
 }
@@ -2785,6 +2787,46 @@ void app.whenReady().then(() => {
       } catch {
         return [];
       }
+    },
+  );
+
+  ipcMain.handle(
+    "libmgr-select-boot-video",
+    async (
+      event: IpcMainInvokeEvent,
+      folderPath: string,
+    ): Promise<{ relativePath?: string; error?: string }> => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return { error: "Window not found." };
+
+      const result = await dialog.showOpenDialog(win, {
+        title: "Select Boot Video",
+        defaultPath: folderPath,
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "Video Files",
+            extensions: ["mp4", "webm", "mkv", "mov", "avi"],
+          },
+        ],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) return {};
+
+      const selectedFile = result.filePaths[0].replace(/\\/g, "/");
+      const normalizedFolder = folderPath
+        .replace(/\\/g, "/")
+        .replace(/\/+$/, "");
+
+      if (!selectedFile.startsWith(normalizedFolder + "/")) {
+        return {
+          error:
+            "The boot video file must be located inside the library folder!",
+        };
+      }
+
+      const relativePath = selectedFile.substring(normalizedFolder.length + 1);
+      return { relativePath };
     },
   );
 
