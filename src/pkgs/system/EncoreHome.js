@@ -372,6 +372,7 @@ class EncoreController {
       "scores/20.wav",
       "scores/50.wav",
       "scores/70.wav",
+      "scores/100.wav",
       "nav.wav",
       "out_of_bounds.wav",
       "session_start.wav",
