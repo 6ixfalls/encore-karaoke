@@ -44,7 +44,7 @@ const pkg = {
    * @param {boolean} [skippable=true] - Whether user can skip playback.
    * @returns {Promise<void>} Resolves when video finishes, fails, or is skipped.
    */
-  async playBootVideo(videoPath, skippable = true) {
+  async playBootVideo(videoPath, skippable = true, playVolume = 1) {
     return new Promise(async (resolve) => {
       let settled = false;
       let stallTimeout = null;
@@ -70,6 +70,7 @@ const pkg = {
       video.preload = "auto";
       video.autoplay = true;
       video.playsInline = true;
+      video.volume = playVolume;
 
       Object.assign(video.style, {
         width: "100%",
@@ -336,7 +337,11 @@ const pkg = {
     const bootVideoRel = libInfo?.manifest?.additionalContents?.bootVideo;
     if (bootVideoRel) {
       const fullBootVideoPath = pathJoin([libInfo.path, bootVideoRel]);
-      await this.playBootVideo(fullBootVideoPath, true);
+      await this.playBootVideo(
+        fullBootVideoPath,
+        true,
+        config.audioConfig?.mix?.instrumental?.volume ?? 1,
+      );
     }
 
     if (this.aborted) return false;
