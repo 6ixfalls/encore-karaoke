@@ -459,6 +459,7 @@
 }
 
 /* -- Title Card -- */
+/* -- Title Card -- */
 .intro-card {
   position: absolute;
   top: 25%;
@@ -475,17 +476,29 @@
   );
   border-top: 2px solid rgba(137, 207, 240, 0.3);
   border-bottom: 2px solid rgba(137, 207, 240, 0.3);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   text-align: center;
   font-family: "Rajdhani", sans-serif;
   color: white;
   z-index: 16;
   opacity: 0;
-  transform: scaleY(0);
+  transform: translateZ(0) scaleY(0);
   pointer-events: none;
   display: flex;
   justify-content: center;
   overflow: hidden;
+
+  /* GPU Compositing and Paint Isolation */
+  visibility: hidden;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  isolation: isolate;
+  contain: paint;
+}
+
+.intro-card.visible,
+.intro-card.exiting {
+  visibility: visible;
 }
 
 .intro-card.visible {
@@ -510,7 +523,7 @@
 
 .intro-card.exiting {
   opacity: 1;
-  transform: scaleY(1);
+  transform: translateZ(0) scaleY(1);
   animation: introBackdropOut 0.3s cubic-bezier(0.87, 0, 0.13, 1) 0.35s both;
 }
 
@@ -518,7 +531,7 @@
 .intro-card.exiting .intro-card-artist,
 .intro-card.exiting .intro-card-meta {
   opacity: 1;
-  transform: translateX(0);
+  transform: translate3d(0, 0, 0);
 }
 
 .intro-card.exiting .intro-card-title {
@@ -549,9 +562,12 @@
   letter-spacing: 0.05em;
   line-height: 1.1;
   text-shadow:
-    0 0 20px rgba(137, 207, 240, 0.5),
-    0 5px 10px rgba(0, 0, 0, 0.8);
+    0 0 12px rgba(137, 207, 240, 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.8);
   opacity: 0;
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 .intro-card-artist {
@@ -566,6 +582,9 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
   margin-top: 0.5rem;
   opacity: 0;
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 .intro-card-meta {
@@ -576,6 +595,9 @@
   letter-spacing: 0.2em;
   text-transform: uppercase;
   opacity: 0;
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 /* -- Interludes -- */
