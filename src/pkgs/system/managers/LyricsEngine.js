@@ -1630,6 +1630,10 @@ export default class LyricsEngine {
       this.lyricsRafId = requestAnimationFrame(() => this.drawLyricsFrame());
       return;
     }
+    if (this.ctx.state.isTransitioning) {
+      this.lyricsRafId = requestAnimationFrame(() => this.drawLyricsFrame());
+      return;
+    }
     const ctx = this.lyricsCtx;
     const canvas = this.ctx.dom.lyricsCanvas.elm;
     const logicalWidth =
@@ -1660,11 +1664,6 @@ export default class LyricsEngine {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
-
-    if (this.ctx.state.isTransitioning) {
-      this.lyricsRafId = requestAnimationFrame(() => this.drawLyricsFrame());
-      return;
-    }
 
     const isMidiMode = Boolean(this.midiLines && this.midiLines.length > 0);
     const isLrcMode =
