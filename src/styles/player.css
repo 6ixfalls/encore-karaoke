@@ -439,6 +439,9 @@
   pointer-events: none;
   z-index: 10;
   transition: opacity 0.3s ease;
+  will-change: opacity, transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 .player-progress {
@@ -458,7 +461,6 @@
   transition: width 0.1s linear;
 }
 
-/* -- Title Card -- */
 /* -- Title Card -- */
 .intro-card {
   position: absolute;
@@ -487,9 +489,6 @@
   display: flex;
   justify-content: center;
   overflow: hidden;
-
-  /* GPU Compositing and Paint Isolation */
-  visibility: hidden;
   will-change: transform, opacity;
   backface-visibility: hidden;
   isolation: isolate;
