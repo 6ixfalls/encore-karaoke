@@ -980,6 +980,46 @@
               <div class="flags-container" id="flags-container"></div>
             </div>
 
+            <div class="editor-group">
+              <label>BOOT VIDEO (OPTIONAL)</label>
+              <div
+                style="
+                  display: flex;
+                  gap: 10px;
+                  align-items: center;
+                  margin-bottom: 8px;
+                "
+              >
+                <div
+                  class="path-display"
+                  id="lib-boot-video"
+                  style="margin-bottom: 0; flex: 1"
+                >
+                  None
+                </div>
+                <button
+                  type="button"
+                  class="action-btn outline"
+                  onclick="chooseBootVideo()"
+                >
+                  Select Video
+                </button>
+                <button
+                  type="button"
+                  class="action-btn danger"
+                  id="clear-boot-video-btn"
+                  onclick="clearBootVideo()"
+                  style="display: none"
+                >
+                  Remove
+                </button>
+              </div>
+              <p class="flag-desc">
+                Must be located inside this library folder. Plays before the
+                song selection screen appears.
+              </p>
+            </div>
+
             <label>LIBRARY ROOT DIRECTORY</label>
             <div class="path-display" id="lib-path"></div>
             <div style="display: flex; gap: 10px; margin-bottom: 20px">
@@ -1143,7 +1183,7 @@
       let bgvVirtualLists = {};
 
       /**
-       * Reusable Virtual List component with free Samsung Smart Fridge (?)
+       * Reusable Virtual List component
        */
       class VirtualList {
         constructor({
@@ -1487,6 +1527,23 @@
         });
       }
 
+      function updateBootVideoDisplay() {
+        const bootVideo = selectedLib?.manifest?.additionalContents?.bootVideo;
+        const displayEl = document.getElementById("lib-boot-video");
+        const clearBtn = document.getElementById("clear-boot-video-btn");
+        if (!displayEl) return;
+
+        if (bootVideo) {
+          displayEl.innerText = bootVideo;
+          displayEl.style.color = "var(--text-main)";
+          if (clearBtn) clearBtn.style.display = "block";
+        } else {
+          displayEl.innerText = "None";
+          displayEl.style.color = "var(--text-muted)";
+          if (clearBtn) clearBtn.style.display = "none";
+        }
+      }
+
       function renderMainPane() {
         document.getElementById("empty-pane").style.display = "none";
         document.getElementById("main-pane").style.display = "flex";
@@ -1496,6 +1553,8 @@
         document.getElementById("lib-desc").value =
           selectedLib.manifest.description || "";
         document.getElementById("lib-path").innerText = selectedLib.path;
+
+        updateBootVideoDisplay();
 
         const isActive = appData.active === selectedLib.path;
         const actionContainer = document.getElementById(
@@ -1523,6 +1582,38 @@
       function onFlagChange() {
         if (selectedLib) {
           queueManifestAutoSave(true);
+        }
+      }
+
+      async function chooseBootVideo() {
+        if (!selectedLib) return;
+        const res = await ipc.invoke(
+          "libmgr-select-boot-video",
+          selectedLib.path,
+        );
+
+        if (res?.error) {
+          showToast(res.error, "var(--danger)");
+          return;
+        }
+
+        if (res?.relativePath) {
+          selectedLib.manifest.additionalContents =
+            selectedLib.manifest.additionalContents || {};
+          selectedLib.manifest.additionalContents.bootVideo = res.relativePath;
+          updateBootVideoDisplay();
+          queueManifestAutoSave(true);
+          showToast("Boot video linked to manifest!", "var(--success)");
+        }
+      }
+
+      function clearBootVideo() {
+        if (!selectedLib) return;
+        if (selectedLib.manifest?.additionalContents?.bootVideo) {
+          delete selectedLib.manifest.additionalContents.bootVideo;
+          updateBootVideoDisplay();
+          queueManifestAutoSave(true);
+          showToast("Boot video removed from manifest.", "var(--text-muted)");
         }
       }
 
@@ -1749,9 +1840,6 @@
         counterEl.innerText = `${count.toLocaleString()} ${count === 1 ? "FILE" : "FILES"}`;
       }
 
-      /**
-       * Search algoritm para hanapin ang pag-ibig niya
-       */
       function onSongSearchInput(query) {
         if (songSearchDebounceTimer) {
           clearTimeout(songSearchDebounceTimer);
