@@ -68,6 +68,7 @@ class EncoreController {
       lyricFontSizeScale: config.videoConfig?.lyricFontSizeScale ?? 1.0,
       lyricLineGapScale: config.videoConfig?.lyricLineGapScale ?? 1.0,
       lyricBottomMargin: config.videoConfig?.lyricBottomMargin ?? 0,
+      lyricAlignment: config.videoConfig?.lyricAlignment || "center",
       isLyricCustomizerVisible: false,
       lyricCustomizerIndex: 0,
       lyricCustomizerView: "main",
