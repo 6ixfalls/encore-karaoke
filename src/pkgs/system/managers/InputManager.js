@@ -390,6 +390,10 @@ export default class InputManager {
           e.preventDefault();
           this.ctx.root.ui.openLyricColorPicker();
           return;
+        } else if (curIdx === 5) {
+          e.preventDefault();
+          this.ctx.root.ui.adjustLyricCustomizer(1);
+          return;
         }
       }
       if (e.key === "ArrowUp") {
@@ -402,7 +406,7 @@ export default class InputManager {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         const curIdx = Number(this.ctx.state.lyricCustomizerIndex) || 0;
-        this.ctx.state.lyricCustomizerIndex = Math.min(4, curIdx + 1);
+        this.ctx.state.lyricCustomizerIndex = Math.min(5, curIdx + 1);
         this.ctx.root.ui.renderLyricCustomizer();
         return;
       }
