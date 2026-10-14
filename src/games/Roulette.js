@@ -7,7 +7,7 @@ export default class RouletteGame {
     this.manager = manager;
     this.id = "roulette";
     this.name = "Karaoke Roulette";
-    this.version = "1.0.0";
+    this.version = "1.0.1";
 
     this.cursors = new Map(); // peerId -> { x, y, name, color }
 
@@ -32,6 +32,7 @@ export default class RouletteGame {
     this.rollStartTime = 0;
 
     this.songsCache = [];
+    this.sequenceCache = [];
 
     this.handlePluginData = this.handlePluginData.bind(this);
     this.handleResize = this.handleResize.bind(this);
@@ -120,6 +121,7 @@ export default class RouletteGame {
     this.songsCache = allSongs.filter(
       (s) => s.path && !s.path.startsWith("yt://"),
     );
+    this.sequenceCache = [];
 
     this.manager.showOverlay(this.id);
     const container = this.manager.container;
@@ -199,7 +201,7 @@ export default class RouletteGame {
   }
 
   sendCursor(vx, vy) {
-    if (!this.ctx.state.isSessionActive) return; // Don't send cursor if offline
+    if (!this.ctx.state.isSessionActive) return;
     const SessionsSvc = this.ctx.services.SessionsSvc;
     if (!SessionsSvc || !SessionsSvc.peer) return;
 
@@ -242,7 +244,6 @@ export default class RouletteGame {
     if (!this.isActive) return;
     const ctx = this.ctx2d;
 
-    // Background clearing
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -250,7 +251,6 @@ export default class RouletteGame {
     ctx.translate(this.offsetX, this.offsetY);
     ctx.scale(this.scale, this.scale);
 
-    // Deep space background with glowing grid
     ctx.fillStyle = "#05050A";
     ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
 
@@ -358,10 +358,18 @@ export default class RouletteGame {
     let displaySongCode = "00000";
     let displaySongTitle = "Searching Database...";
 
+    const displayPool =
+      this.sequenceCache && this.sequenceCache.length > 0
+        ? this.sequenceCache
+        : this.songsCache;
+
     if (elapsed < SEQUENCE_TIME) {
-      const randomIdx = Math.floor(elapsed / 50) % this.songsCache.length;
-      displaySongCode = this.songsCache[randomIdx].code || "?????";
-      displaySongTitle = this.songsCache[randomIdx].title;
+      if (displayPool.length > 0) {
+        const randomIdx = Math.floor(elapsed / 50) % displayPool.length;
+        displaySongCode = displayPool[randomIdx].code || "?????";
+        displaySongTitle =
+          displayPool[randomIdx].title || "Searching Database...";
+      }
     } else {
       this.view = "result";
       if (
@@ -402,6 +410,20 @@ export default class RouletteGame {
     const isHost =
       !this.ctx.state.isSessionActive || this.ctx.services.SessionsSvc.isHost;
 
+    if (
+      this.rollTargetSong &&
+      (!this.rollTargetSong.path || !this.rollTargetSong.artist) &&
+      this.ctx.state.songMap
+    ) {
+      const match =
+        this.ctx.state.songMap.get(this.rollTargetSong.code) ||
+        this.ctx.state.songMap.get(Number(this.rollTargetSong.code)) ||
+        this.ctx.state.songMap.get(String(this.rollTargetSong.code));
+      if (match) {
+        this.rollTargetSong = { ...match, ...this.rollTargetSong };
+      }
+    }
+
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
@@ -429,7 +451,7 @@ export default class RouletteGame {
     ctx.fillStyle = "#fff";
     ctx.font = "bold 80px 'Radio Canada', sans-serif";
 
-    let renderTitle = this.rollTargetSong.title;
+    let renderTitle = this.rollTargetSong.title || "Unknown Title";
     if (ctx.measureText(renderTitle).width > V_WIDTH - 200) {
       renderTitle = renderTitle.substring(0, 40) + "...";
     }
@@ -555,11 +577,14 @@ export default class RouletteGame {
   }
 
   triggerSpin() {
+    if (!this.songsCache || this.songsCache.length === 0) return;
+
     const randomSong =
       this.songsCache[Math.floor(Math.random() * this.songsCache.length)];
     const startTime = Date.now();
 
-    const networkSongsCache = Array.from({ length: 50 }, () => {
+    const sampleCount = Math.min(50, this.songsCache.length);
+    const networkSongsCache = Array.from({ length: sampleCount }, () => {
       const s =
         this.songsCache[Math.floor(Math.random() * this.songsCache.length)];
       return { title: s.title, code: s.code };
@@ -568,12 +593,7 @@ export default class RouletteGame {
     if (this.ctx.state.isSessionActive) {
       this.ctx.services.SessionsSvc.broadcastPluginData(this.id, {
         action: "start_sequence",
-        targetSong: {
-          title: randomSong.title,
-          code: randomSong.code,
-          artist: randomSong.artist,
-          path: randomSong.path,
-        },
+        targetSong: { ...randomSong },
         songsCache: networkSongsCache,
         startTime: startTime,
       });
@@ -582,9 +602,9 @@ export default class RouletteGame {
     this.startSequence(randomSong, networkSongsCache, startTime);
   }
 
-  startSequence(song, songsCache, startTime) {
+  startSequence(song, sequenceSongs, startTime) {
     this.rollTargetSong = song;
-    this.songsCache = songsCache;
+    this.sequenceCache = sequenceSongs || [];
     this.rollStartTime = startTime || Date.now();
     this.view = "sequence";
   }
