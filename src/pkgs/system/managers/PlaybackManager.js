@@ -158,6 +158,20 @@ export default class PlaybackManager {
 
     if (state.isDriveDisconnected) return;
 
+    if (!song || !song.path || typeof song.path !== "string") {
+      console.error(
+        "[PlaybackManager] Cannot start playback: Invalid song path",
+        song,
+      );
+      state.isTransitioning = false;
+      this.ctx.modules.infoBar?.showTemp(
+        "ERROR",
+        "Invalid song selected.",
+        3000,
+      );
+      return;
+    }
+
     state.currentSong = song;
     state.isTransitioning = true;
     modules.recorder.setSongInfo(song);
