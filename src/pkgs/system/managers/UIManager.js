@@ -1952,6 +1952,7 @@ export default class UIManager {
 
     const currentFont = state.lyricFontFamily || "Radio Canada";
     const currentMargin = Number(state.lyricBottomMargin) || 0;
+    const currentAlignment = state.lyricAlignment || "center";
     const activeIdx = Number(state.lyricCustomizerIndex) || 0;
     const savedColors = this.ctx.config.videoConfig?.lyricColors || {};
 
@@ -1996,6 +1997,13 @@ export default class UIManager {
         max: 150,
         value: currentMargin,
         display: `${currentMargin > 0 ? "+" : ""}${currentMargin}px`,
+      },
+      {
+        id: "alignment",
+        type: "select",
+        label: "Line Alignment",
+        value: currentAlignment,
+        display: currentAlignment === "alternating" ? "Left / Right" : "Center",
       },
     ];
 
@@ -2047,6 +2055,17 @@ export default class UIManager {
           <span class="customizer-val-text" style="color: #89cff0;">Palette</span>
           <span style="opacity: 0.5; font-size: 0.85em; margin-left: 6px; color: #89cff0;">↵</span>
         `);
+      } else if (opt.id === "alignment") {
+        row.on("click", () => {
+          state.lyricCustomizerIndex = idx;
+          this.adjustLyricCustomizer(1);
+        });
+
+        valArea.html(`
+    <span class="customizer-arrow">◀</span>
+    <span class="customizer-val-text" style="min-width: 130px; text-align: center; color: #89cff0; font-weight: 700;">${opt.display}</span>
+    <span class="customizer-arrow">▶</span>
+  `);
       } else {
         row.on("click", () => {
           state.lyricCustomizerIndex = idx;
@@ -2103,6 +2122,12 @@ export default class UIManager {
       state.lyricBottomMargin = nextMargin;
       this.ctx.config.videoConfig.lyricBottomMargin = nextMargin;
       window.config?.setItem?.("videoConfig.lyricBottomMargin", nextMargin);
+    } else if (activeIdx === 5) {
+      const current = state.lyricAlignment || "center";
+      const next = current === "center" ? "alternating" : "center";
+      state.lyricAlignment = next;
+      this.ctx.config.videoConfig.lyricAlignment = next;
+      window.config?.setItem?.("videoConfig.lyricAlignment", next);
     }
 
     const lyricsEngine = this.ctx.root.lyrics || this.ctx.modules.lyrics;
