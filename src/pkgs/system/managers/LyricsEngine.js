@@ -996,7 +996,12 @@ export default class LyricsEngine {
     let currentY = mainFontSize * 1.5;
     this.renderableLines = [];
 
-    const buildLineLayout = (lineData, isNextLine, isPreviousLine = false) => {
+    const buildLineLayout = (
+      lineData,
+      isNextLine,
+      isPreviousLine = false,
+      lineIndex = 0,
+    ) => {
       if (!lineData || lineData.length === 0) return;
       const flatSyllables = [];
       ctx.font = mainFontStr;
@@ -1293,7 +1298,18 @@ export default class LyricsEngine {
           if (r[j].furiW > 0 || r[j].furigana) hasFurigana = true;
         }
 
-        const startX = (logicalWidth - rowWidth) / 2;
+        const sideMargin = (logicalWidth - maxWidth) / 2;
+        let startX = (logicalWidth - rowWidth) / 2;
+
+        const alignment = this.ctx.state.lyricAlignment || "center";
+        if (alignment === "alternating" || alignment === "split") {
+          if (lineIndex === 0) {
+            startX = sideMargin;
+          } else {
+            startX = Math.max(sideMargin, logicalWidth - rowWidth - sideMargin);
+          }
+        }
+
         const extraTop = hasFurigana ? mainFontSize * 0.6 : 0;
         const extraBottom = hasRomaji ? mainFontSize * 0.6 : 0;
 
@@ -1328,8 +1344,8 @@ export default class LyricsEngine {
       const isLine1Prev = isLastLine && !isLine1Active;
       const isLine2Prev = isLastLine && isLine1Active;
 
-      buildLineLayout(this.currentMidiLine1, isLine1Next, isLine1Prev);
-      buildLineLayout(this.currentMidiLine2, isLine2Next, isLine2Prev);
+      buildLineLayout(this.currentMidiLine1, isLine1Next, isLine1Prev, 0);
+      buildLineLayout(this.currentMidiLine2, isLine2Next, isLine2Prev, 1);
     } else if (
       !this.ctx.state.currentSongIsMIDI &&
       this.parsedLrc &&
@@ -1351,11 +1367,13 @@ export default class LyricsEngine {
         this.currentLrcLine1?.syllables || [],
         isLine1Next,
         isLine1Prev,
+        0,
       );
       buildLineLayout(
         this.currentLrcLine2?.syllables || [],
         isLine2Next,
         isLine2Prev,
+        1,
       );
     }
 
