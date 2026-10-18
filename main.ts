@@ -111,6 +111,7 @@ export interface LibraryFlags {
   flipArtistTitle?: boolean;
   enableMtvCategory?: boolean;
   enableDefaultCategories?: boolean;
+  isSongHub?: boolean;
   [key: string]: unknown;
 }
 
@@ -1023,6 +1024,13 @@ server.get("/getFile", (req: Request, res: Response) => {
     if (fPath.endsWith(".lrc")) {
       res.sendFile(fPath, {
         headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+      return;
+    }
+
+    if (fPath.endsWith(".cho")) {
+      res.sendFile(fPath, {
+        headers: { "Content-Type": "audio/mpeg" },
       });
       return;
     }
@@ -2726,6 +2734,7 @@ void app.whenReady().then(() => {
             flipArtistTitle: false,
             enableMtvCategory: true,
             enableDefaultCategories: true,
+            isSongHub: false,
           },
           additionalContents: { bgvCategories: [], bumperImages: [] },
         };

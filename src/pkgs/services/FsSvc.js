@@ -401,6 +401,7 @@ const pkg = {
         "lrc",
         "json",
         "cdg",
+        "cho",
       ]);
 
       const fileSignatures = [...files]
@@ -415,7 +416,8 @@ const pkg = {
         .map((f) => `${nfc(f.name)}:${f.modified}`)
         .join("|");
 
-      const currentSignature = `${dbVersion}:${fileSignatures}`;
+      const isSongHub = Boolean(loadedManifest?.flags?.isSongHub);
+      const currentSignature = `${dbVersion}:${isSongHub ? "sh:1" : "sh:0"}:${fileSignatures}`;
 
       const hasSongDb = files.some(
         (f) =>
@@ -458,6 +460,7 @@ const pkg = {
         const shouldFlip =
           flipArtistTitle &&
           !isPlatinum &&
+          !isSongHub &&
           song.artist &&
           song.artist !== "Unknown Artist" &&
           song.title;
@@ -537,12 +540,28 @@ const pkg = {
       const findSibling = (name) =>
         byLower.get(nfc(name).toLowerCase()) || null;
 
+      const cdgByCode = new Map();
+      const choByCode = new Map();
+      if (isSongHub) {
+        for (const f of files) {
+          if (f.type !== "file" || isAppleDouble(f.name)) continue;
+          const lower = nfc(f.name).toLowerCase();
+          const codeMatch = lower.match(/^(\d+)\s*-\s*/);
+          if (codeMatch) {
+            const code = codeMatch[1];
+            if (lower.endsWith(".cdg")) cdgByCode.set(code, f.name);
+            if (lower.endsWith(".cho")) choByCode.set(code, f.name);
+          }
+        }
+      }
+
       const processableFiles = files.filter((file) => {
         if (file.type !== "file" || isAppleDouble(file.name)) return false;
 
         const fileNameLower = nfc(file.name).toLowerCase();
         if (manifestBgvFiles.has(fileNameLower)) return false;
         if (fileNameLower.includes(".chorus.")) return false;
+        if (fileNameLower.endsWith(".cho")) return false; // Auxiliary chorus track for SongHub
         if (
           fileNameLower.includes(".guide.") ||
           fileNameLower.includes(".melody.")
@@ -629,10 +648,48 @@ const pkg = {
               if (videoName) break;
             }
 
+            let songData = null;
+            let artist = "Unknown Artist";
+            let title = basename.replace(/\[.*?\]/g, "").trim();
+            let extractedCode = null;
+
+            if (isSongHub) {
+              // Parse SongHub convention: [Number] - [Title] - [Singer]
+              const cleanName = basename.replace(/\[.*?\]/g, "").trim();
+              const codeMatch = cleanName.match(/^(\d+)\s*-\s*(.+)$/);
+              let metaPart = cleanName;
+
+              if (codeMatch) {
+                extractedCode = codeMatch[1];
+                metaPart = codeMatch[2].trim();
+              }
+
+              const parts = metaPart.split(" - ");
+              if (parts.length >= 2) {
+                title = parts.slice(0, -1).join(" - ").trim();
+                artist = parts[parts.length - 1].trim();
+              } else {
+                title = metaPart.trim();
+                artist = "Unknown Artist";
+              }
+            }
+
             let chorusName = null;
-            for (const audioExt of audioExtensions) {
-              chorusName = findSibling(`${basename}.chorus.${audioExt}`);
-              if (chorusName) break;
+            if (isSongHub) {
+              chorusName = findSibling(`${basename}.cho`);
+              if (
+                !chorusName &&
+                extractedCode &&
+                choByCode.has(extractedCode)
+              ) {
+                chorusName = choByCode.get(extractedCode);
+              }
+            }
+            if (!chorusName) {
+              for (const audioExt of audioExtensions) {
+                chorusName = findSibling(`${basename}.chorus.${audioExt}`);
+                if (chorusName) break;
+              }
             }
 
             const midiGuideName =
@@ -643,12 +700,17 @@ const pkg = {
               findSibling(`${basename}.mid`) ||
               findSibling(`${basename}.kar`);
 
-            let songData = null;
-            let artist = "Unknown Artist";
-            let title = basename.replace(/\[.*?\]/g, "").trim();
-
             const lrcName = findSibling(`${basename}.lrc`);
-            const cdgName = findSibling(`${basename}.cdg`);
+            let cdgName = findSibling(`${basename}.cdg`);
+            if (
+              !cdgName &&
+              isSongHub &&
+              extractedCode &&
+              cdgByCode.has(extractedCode)
+            ) {
+              cdgName = cdgByCode.get(extractedCode);
+            }
+
             const isVideo = videoExtensions.has(extension);
             const hasLrc = Boolean(lrcName);
             const hasCdg = Boolean(cdgName);
@@ -656,7 +718,7 @@ const pkg = {
 
             if (
               (audioExtensions.has(extension) &&
-                (hasLrc || hasCdg || hasMidiGuide)) ||
+                (isSongHub || hasLrc || hasCdg || hasMidiGuide)) ||
               isVideo
             ) {
               if (state.buildAbortController?.signal.aborted) {
@@ -679,36 +741,38 @@ const pkg = {
                 videoName = filename;
               }
 
-              try {
-                const urlObj = await NetworkingUtility.getFileLink(fullPath);
-                const tags = await new Promise((resolve, reject) => {
-                  if (state.buildAbortController?.signal.aborted) {
-                    reject(new Error("Build cancelled"));
-                  } else {
-                    jsmediatags.read(urlObj.href, {
-                      onSuccess: resolve,
-                      onError: reject,
-                    });
-                  }
-                });
-                if (tags.tags.title) title = tags.tags.title;
-                if (tags.tags.artist) artist = tags.tags.artist;
+              if (!isSongHub) {
+                try {
+                  const urlObj = await NetworkingUtility.getFileLink(fullPath);
+                  const tags = await new Promise((resolve, reject) => {
+                    if (state.buildAbortController?.signal.aborted) {
+                      reject(new Error("Build cancelled"));
+                    } else {
+                      jsmediatags.read(urlObj.href, {
+                        onSuccess: resolve,
+                        onError: reject,
+                      });
+                    }
+                  });
+                  if (tags.tags.title) title = tags.tags.title;
+                  if (tags.tags.artist) artist = tags.tags.artist;
 
-                if (!tags.tags.title && !tags.tags.artist) {
+                  if (!tags.tags.title && !tags.tags.artist) {
+                    let parts = title.split(" - ");
+                    if (parts.length >= 2) {
+                      artist = parts[0].trim();
+                      title = parts.slice(1).join(" - ").trim();
+                    }
+                  }
+                } catch (error) {
+                  console.warn(
+                    `[FsSvc] Tag read failed for ${filename}, using filename.`,
+                  );
                   let parts = title.split(" - ");
                   if (parts.length >= 2) {
                     artist = parts[0].trim();
                     title = parts.slice(1).join(" - ").trim();
                   }
-                }
-              } catch (error) {
-                console.warn(
-                  `[FsSvc] Tag read failed for ${filename}, using filename.`,
-                );
-                let parts = title.split(" - ");
-                if (parts.length >= 2) {
-                  artist = parts[0].trim();
-                  title = parts.slice(1).join(" - ").trim();
                 }
               }
             } else if (extension === "mid" || extension === "kar") {
@@ -794,7 +858,7 @@ const pkg = {
                 }
               }
 
-              if (!parsedFromMidi) {
+              if (!parsedFromMidi && !isSongHub) {
                 let parts = title.split(" - ");
                 if (parts.length >= 2) {
                   artist = parts[0].trim();
@@ -805,6 +869,7 @@ const pkg = {
 
             if (songData) {
               return {
+                extractedCode,
                 artist,
                 title,
                 type: songData.type,
@@ -828,11 +893,18 @@ const pkg = {
           if (!parsedData) continue;
 
           let songCode;
-          if (codeMap.has(parsedData.path)) {
+          if (isSongHub && parsedData.extractedCode) {
+            songCode = parsedData.extractedCode.padStart(6, "0");
+          } else if (codeMap.has(parsedData.path)) {
             songCode = codeMap.get(parsedData.path);
           } else {
             maxCode++;
             songCode = String(maxCode).padStart(6, "0");
+          }
+
+          const numCode = parseInt(songCode, 10);
+          if (!isNaN(numCode) && numCode > maxCode) {
+            maxCode = numCode;
           }
 
           const newSongObj = {
