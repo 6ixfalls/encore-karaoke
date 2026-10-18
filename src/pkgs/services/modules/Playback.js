@@ -428,11 +428,9 @@ export class FortePlayback {
     this.state.playback.sequencer.loop = false;
     this.state.playback.sequencer.skipToFirstNoteOn = !isCompanion;
 
-    if (!isCompanion) {
-      this.synthesizer.connectSequencerToMidiOutput(
-        this.state.playback.sequencer,
-      );
-    }
+    this.synthesizer.connectSequencerToMidiOutput(
+      this.state.playback.sequencer,
+    );
 
     bindSpessaEvent(
       this.state.playback.sequencer.eventHandler,
@@ -1588,6 +1586,10 @@ export class FortePlayback {
           this.state.playback.sequencer.currentTime = resumeTime;
         }
         this.state.playback.sequencer.play();
+
+        if (this.state.playback.guideVolume !== undefined) {
+          this.setGuideTrackVolume(this.state.playback.guideVolume);
+        }
       }
 
       this.audioElement.onended = () => {
