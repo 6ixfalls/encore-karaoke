@@ -17,6 +17,8 @@ export class BGVModule {
     this.canvasOnlyMode = false;
 
     this._heartbeatRafId = null;
+    this.fillMode = "cover"; // ("fill", "cover", or "contain")
+    this.isCurrentMediaCamera = false;
 
     this.videoElementStyles = {
       position: "absolute",
@@ -24,7 +26,7 @@ export class BGVModule {
       left: "0",
       width: "100%",
       height: "100%",
-      objectFit: "contain",
+      objectFit: this.fillMode,
       opacity: "0",
       transition: "opacity 0.5s ease-in-out",
       zIndex: "1",
@@ -443,6 +445,24 @@ export class BGVModule {
   }
 
   /**
+   * Updates the background video fill mode.
+   * Keeps camera aspect ratio locked to "contain".
+   * @param {"fill"|"cover"|"contain"} mode
+   */
+  setFillMode(mode) {
+    this.fillMode = mode;
+    this.videoElementStyles.objectFit = mode;
+
+    if (this.videoElement && !this.isCurrentMediaCamera) {
+      this.videoElement.style.objectFit = mode;
+    }
+
+    if (this.activeManualPlayer) {
+      this.activeManualPlayer.style.objectFit = mode;
+    }
+  }
+
+  /**
    * Start playback of the current playlist
    */
   start() {
@@ -546,6 +566,9 @@ export class BGVModule {
         this.prevImageState = null;
       }, 500);
 
+      const isCamera = url === "live_stream";
+      this.isCurrentMediaCamera = isCamera;
+
       const v = document.createElement("video");
       v.muted = true;
       v.autoplay = false;
@@ -555,6 +578,8 @@ export class BGVModule {
       v.volume = 0;
 
       Object.assign(v.style, this.videoElementStyles);
+
+      v.style.objectFit = isCamera ? "contain" : this.fillMode;
 
       v.addEventListener("volumechange", () => (v.volume = 0));
       v.onended = () => this.playNext();
@@ -625,6 +650,7 @@ export class BGVModule {
    */
   async playSingleVideo(url, isMuted = true) {
     this.isManualMode = true;
+    this.isCurrentMediaCamera = false;
     this._startCompositorHeartbeat();
     if (this.videoElement) this.videoElement.onended = null;
 
@@ -653,6 +679,7 @@ export class BGVModule {
     v.volume = isMuted ? 0 : 1;
 
     Object.assign(v.style, this.videoElementStyles);
+    v.style.objectFit = this.fillMode;
 
     if (this.canvasOnlyMode) {
       v.style.display = "";
