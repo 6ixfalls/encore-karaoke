@@ -44,7 +44,12 @@ const pkg = {
    * @param {boolean} [skippable=true] - Whether user can skip playback.
    * @returns {Promise<void>} Resolves when video finishes, fails, or is skipped.
    */
-  async playBootVideo(videoPath, skippable = true, playVolume = 1) {
+  async playBootVideo(
+    videoPath,
+    skippable = true,
+    playVolume = 1,
+    fillMode = "cover",
+  ) {
     return new Promise(async (resolve) => {
       let settled = false;
       let stallTimeout = null;
@@ -75,7 +80,7 @@ const pkg = {
       Object.assign(video.style, {
         width: "100%",
         height: "100%",
-        objectFit: "contain",
+        objectFit: fillMode,
         backgroundColor: "#000",
       });
 
@@ -341,6 +346,7 @@ const pkg = {
         fullBootVideoPath,
         true,
         config.audioConfig?.mix?.instrumental?.volume ?? 1,
+        config.videoConfig?.bgvFillMode || "cover",
       );
     }
 
