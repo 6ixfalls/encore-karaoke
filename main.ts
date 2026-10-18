@@ -2278,6 +2278,9 @@ void app.whenReady().then(() => {
             if (song.videoPath) {
               formatText = "[MTV]";
               formatColor = "#2F6CD1";
+            } else if (song.chorusPath) {
+              formatText = "[CHR]";
+              formatColor = "#FFD700";
             } else if (song.type === "multiplexed") {
               formatText = "[MP]";
               formatColor = "#2FD147";
