@@ -989,18 +989,22 @@ export default class SetupManager {
             title: "Video Synchronization & Playback",
             items: [
               {
-                id: "enable_extra_interludes",
-                label: "Easter Egg Interludes (Requires Restart)",
+                id: "bgv_fill_mode",
+                label: "BGV Aspect Ratio / Fill Mode",
                 type: "select",
                 options: [
-                  { value: false, label: "No" },
-                  { value: true, label: "Yes" },
+                  { value: "fill", label: "Stretch" },
+                  { value: "cover", label: "Crop & Zoom" },
+                  { value: "contain", label: "Fit Screen" },
                 ],
-                get: () => this.ctx.config.enableEasterEggInterludes ?? false,
+                get: () => this.ctx.config.videoConfig?.bgvFillMode || "cover",
                 set: (v) => {
-                  this.ctx.config.enableEasterEggInterludes = v;
-                  this.ctx.state.isEasterEggInterludeEnabled = v;
-                  window.config.setItem("enableEasterEggInterludes", v);
+                  this.ctx.config.videoConfig ??= {};
+                  this.ctx.config.videoConfig.bgvFillMode = v;
+                  window.config.setItem("videoConfig.bgvFillMode", v);
+                  if (this.ctx.modules.bgv?.setFillMode) {
+                    this.ctx.modules.bgv.setFillMode(v);
+                  }
                 },
               },
               {
@@ -1022,6 +1026,21 @@ export default class SetupManager {
                 label: "Preview & Calibrate Sync",
                 type: "action",
                 action: () => this.startVideoPreview(),
+              },
+              {
+                id: "enable_extra_interludes",
+                label: "Easter Egg Interludes (Requires Restart)",
+                type: "select",
+                options: [
+                  { value: false, label: "No" },
+                  { value: true, label: "Yes" },
+                ],
+                get: () => this.ctx.config.enableEasterEggInterludes ?? false,
+                set: (v) => {
+                  this.ctx.config.enableEasterEggInterludes = v;
+                  this.ctx.state.isEasterEggInterludeEnabled = v;
+                  window.config.setItem("enableEasterEggInterludes", v);
+                },
               },
             ],
           },
