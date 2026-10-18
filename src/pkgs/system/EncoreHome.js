@@ -515,6 +515,13 @@ class EncoreController {
       this.bgv.selectedCategory = "Auto";
     }
 
+    try {
+      const savedFillMode = this.config.videoConfig?.bgvFillMode || "cover";
+      this.bgv.setFillMode(savedFillMode);
+    } catch (e) {
+      this.bgv.setFillMode("fill");
+    }
+
     this.ui.startBumperCycle();
     await this.bgv.updatePlaylistForCategory();
 
