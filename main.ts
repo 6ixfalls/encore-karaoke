@@ -2882,6 +2882,65 @@ void app.whenReady().then(() => {
   );
 
   ipcMain.handle(
+    "libmgr-select-bumper-images",
+    async (
+      event: IpcMainInvokeEvent,
+      folderPath: string,
+    ): Promise<{ relativePaths: string[]; outsideCount: number }> => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return { relativePaths: [], outsideCount: 0 };
+      const result = await dialog.showOpenDialog(win, {
+        title: "Select Idle Bumper Images",
+        defaultPath: folderPath,
+        properties: ["openFile", "multiSelections"],
+        filters: [
+          {
+            name: "Image Files",
+            extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+          },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+
+      if (result.canceled) return { relativePaths: [], outsideCount: 0 };
+
+      const relativePaths: string[] = [];
+      let outsideCount = 0;
+
+      for (const filePath of result.filePaths) {
+        const normalizedFile = filePath.replace(/\\/g, "/");
+        const normalizedFolder = folderPath.replace(/\\/g, "/");
+
+        if (normalizedFile.startsWith(normalizedFolder)) {
+          let relPath = normalizedFile.substring(normalizedFolder.length);
+          if (relPath.startsWith("/")) relPath = relPath.substring(1);
+          relativePaths.push(relPath);
+        } else {
+          outsideCount++;
+        }
+      }
+      return { relativePaths, outsideCount };
+    },
+  );
+
+  ipcMain.handle(
+    "libmgr-get-image-preview",
+    async (_event: IpcMainInvokeEvent, fullPath: string) => {
+      try {
+        if (!fullPath || typeof fullPath !== "string") return null;
+        const normalized = path.normalize(fullPath);
+        if (!fs.existsSync(normalized)) return null;
+
+        const mimeType = mime.lookup(normalized) || "image/png";
+        const buf = await fs.promises.readFile(normalized);
+        return `data:${mimeType};base64,${buf.toString("base64")}`;
+      } catch {
+        return null;
+      }
+    },
+  );
+
+  ipcMain.handle(
     "libmgr-update-manifest",
     (
       _event: IpcMainInvokeEvent,
