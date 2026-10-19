@@ -1,14 +1,18 @@
+import type { Tables } from "./types.js";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import { requireValue } from "../shared/contracts.js";
-import { secret } from "./secrets.mjs";
-import { migrate } from "./schema.mjs";
+import { secret } from "./secrets.js";
+import { migrate } from "./schema.js";
 
-export { secret, digest } from "./secrets.mjs";
+export { secret, digest } from "./secrets.js";
 
 export class Store {
-  constructor(directory) {
+  db: DatabaseSync;
+  authEpoch: string;
+  deployment: string;
+  constructor(directory: string) {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path.join(directory, "encore.sqlite"));
     this.db.exec(
@@ -21,7 +25,7 @@ export class Store {
       throw error;
     }
     if (!this.get("meta", "authEpoch")) this.put("meta", "authEpoch", secret());
-    this.authEpoch = this.get("meta", "authEpoch");
+    this.authEpoch = this.get("meta", "authEpoch") as string;
     // Every process has a new deployment epoch. Authentication survives normal restarts.
     this.deployment = secret();
     this.put("meta", "deployment", this.deployment);
@@ -36,31 +40,31 @@ export class Store {
       }
     });
   }
-  get(table, id) {
+  get<T extends keyof Tables>(table: T, id: string): Tables[T] | undefined {
     const row = this.db
       .prepare(
         `SELECT value FROM ${this.table(table)} WHERE ${table === "meta" ? "key" : "id"}=?`,
       )
       .get(id);
-    return row ? JSON.parse(row.value) : undefined;
+    return row ? JSON.parse(row.value as string) : undefined;
   }
-  put(table, id, value) {
+  put<T extends keyof Tables>(table: T, id: string, value: Tables[T]) {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO ${this.table(table)} (${table === "meta" ? "key" : "id"},value) VALUES (?,?)`,
       )
       .run(id, JSON.stringify(value));
   }
-  all(table) {
+  all<T extends keyof Tables>(table: T): Tables[T][] {
     return this.db
       .prepare(`SELECT value FROM ${this.table(table)}`)
       .all()
-      .map((r) => JSON.parse(r.value));
+      .map((r) => JSON.parse(r.value as string));
   }
-  delete(table, id) {
+  delete(table: keyof Tables, id: string) {
     this.db.prepare(`DELETE FROM ${this.table(table)} WHERE id=?`).run(id);
   }
-  table(name) {
+  table(name: keyof Tables) {
     requireValue(
       [
         "meta",
@@ -75,7 +79,7 @@ export class Store {
     );
     return name;
   }
-  transaction(fn) {
+  transaction<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = fn();

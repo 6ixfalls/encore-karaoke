@@ -5,9 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import { io } from "socket.io-client";
-import { Store } from "../../server/store.mjs";
-import { createApplication } from "../../server/app.mjs";
-import { configuration } from "../../server/config.mjs";
+import { Store } from "../../dist/server/store.js";
+import { createApplication } from "../../dist/server/app.js";
+import { configuration } from "../../dist/server/config.js";
 
 async function fixture(t, overrides = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "encore-http-"));

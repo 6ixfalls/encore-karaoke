@@ -1,20 +1,23 @@
+import type { Store } from "./store.js";
+import type { Configuration } from "./config.js";
+import type { Session, Role } from "./types.js";
+import type { Request } from "express";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { secret, digest } from "./store.mjs";
+import { secret, digest } from "./store.js";
 import { requireValue, text, Fault } from "../shared/contracts.js";
 
 export class Auth {
-  constructor(store, config) {
-    this.store = store;
-    this.config = config;
+  attempts: Map<string, number[]>;
+  constructor(private store: Store, private config: Configuration) {
     this.attempts = new Map();
   }
-  session(cookie = "") {
+  session(cookie = ""): Session | null {
     const token = cookie
       .split(";")
       .map((s) => s.trim())
       .find((s) => s.startsWith("encore_session="))
       ?.slice(15);
-    const session = token && this.store.get("sessions", digest(token));
+    const session = token ? this.store.get("sessions", digest(token)) : undefined;
     return session &&
       !session.revoked &&
       session.epoch === this.store.authEpoch &&
@@ -22,9 +25,9 @@ export class Auth {
       ? session
       : null;
   }
-  create(role, nickname, principal) {
+  create(role: Role, nickname: unknown, principal?: string) {
     const token = secret();
-    const session = {
+    const session: Session = {
       id: randomUUID(),
       role,
       nickname: text(nickname, 40),
@@ -47,23 +50,23 @@ export class Auth {
       cookie: `encore_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${this.config.secure ? "; Secure" : ""}`,
     };
   }
-  login(key) {
+  login(key: unknown): "admin" | "host" {
     requireValue(
       typeof key === "string" && key.length <= 512,
       "invalid_credentials",
       401,
     );
-    const equal = (expected) =>
+    const equal = (expected: string | undefined) =>
       expected &&
       timingSafeEqual(Buffer.from(digest(key)), Buffer.from(digest(expected)));
     if (equal(this.config.adminKey)) return "admin";
     if (equal(this.config.hostKey)) return "host";
     throw new Fault("invalid_credentials", 401);
   }
-  origin(origin) {
+  origin(origin: unknown) {
     requireValue(origin === this.config.origin, "invalid_origin", 403);
   }
-  mutation(req) {
+  mutation(req: Request) {
     this.origin(req.headers.origin);
     if (req.session)
       requireValue(
@@ -72,10 +75,10 @@ export class Auth {
         403,
       );
   }
-  throttle(key, limit = 10) {
+  throttle(key: string, limit = 10) {
     const now = Date.now();
     for (const [k, times] of this.attempts)
-      if (times.at(-1) <= now - 60_000) this.attempts.delete(k);
+      if (times.at(-1)! <= now - 60_000) this.attempts.delete(k);
     requireValue(
       this.attempts.size < 10_000 || this.attempts.has(key),
       "rate_limited",

@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { requireValue } from "../shared/contracts.js";
 
-export function configuration(env = process.env) {
+export function configuration(env: NodeJS.ProcessEnv = process.env) {
   const publicUrl = new URL(env.PUBLIC_BASE_URL || "http://localhost:3000");
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(
     publicUrl.hostname,
@@ -19,9 +19,10 @@ export function configuration(env = process.env) {
       (local && publicUrl.protocol === "http:"),
     "https_required",
   );
-  const credential = (name, required) => {
-    const value = env[`${name}_FILE`]
-      ? fs.readFileSync(env[`${name}_FILE`], "utf8").trim()
+  const credential = (name: string, required: boolean) => {
+    const filename = env[`${name}_FILE`];
+    const value = filename
+      ? fs.readFileSync(filename, "utf8").trim()
       : env[name];
     requireValue(
       (!required && !value) ||
@@ -44,3 +45,5 @@ export function configuration(env = process.env) {
     trustedProxies: (env.TRUSTED_PROXIES || "").split(",").map((ip) => ip.trim()).filter(Boolean),
   };
 }
+
+export type Configuration = ReturnType<typeof configuration>;

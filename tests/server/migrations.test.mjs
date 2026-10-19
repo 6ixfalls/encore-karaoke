@@ -5,9 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
-import { migrate, MIGRATIONS } from "../../server/schema.mjs";
-import { Store } from "../../server/store.mjs";
-import { backup, restore, lock } from "../../server/operations.mjs";
+import { migrate, MIGRATIONS } from "../../dist/server/schema.js";
+import { Store } from "../../dist/server/store.js";
+import { backup, restore, lock } from "../../dist/server/operations.js";
 
 function versionOne(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "encore-schema-")),
@@ -127,7 +127,7 @@ test("process interruption before migration commit restores the original schema 
 test("the singleton lock excludes another process and is released automatically on a crash", t => {
   const { db, directory } = versionOne(t);
   db.close();
-  const moduleUrl = new URL("../../server/operations.mjs", import.meta.url).href;
+  const moduleUrl = new URL("../../dist/server/operations.js", import.meta.url).href;
   const child = `import { lock } from ${JSON.stringify(moduleUrl)}; lock(process.argv[1]);`;
   const unlock = lock(directory);
   const blocked = spawnSync(process.execPath, ["--input-type=module", "-e", child, directory]);

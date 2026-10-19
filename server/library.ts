@@ -1,20 +1,23 @@
+import type { Store } from "./store.js";
+import { serviceError } from "./types.js";
+import type { Asset, Song } from "./types.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { constants } from "node:fs";
-import { digest } from "./store.mjs";
+import { digest } from "./store.js";
 import { requireValue } from "../shared/contracts.js";
 
-const TYPES = { ".mp3": "audio/mpeg", ".lrc": "text/plain; charset=utf-8" };
-export const inside = (root, file) =>
+const TYPES: Record<string, string> = { ".mp3": "audio/mpeg", ".lrc": "text/plain; charset=utf-8" };
+export const inside = (root: string, file: string) =>
   file !== root &&
   !path.relative(root, file).startsWith(`..${path.sep}`) &&
   path.relative(root, file) !== ".." &&
   !path.isAbsolute(path.relative(root, file));
 
 export class Library {
-  constructor(store, directory) {
-    this.store = store;
-    this.directory = directory;
+  scanning: boolean;
+  status: { state: string; count?: number; error?: string };
+  constructor(private store: Store, private directory: string) {
     this.scanning = false;
     this.status = { state: "idle" };
   }
@@ -24,9 +27,9 @@ export class Library {
     this.status = { state: "scanning" };
     try {
       const root = await fs.realpath(this.directory);
-      const assets = [],
-        songs = [];
-      const walk = async (directory, depth = 0) => {
+      const assets: Asset[] = [],
+        songs: Song[] = [];
+      const walk = async (directory: string, depth = 0) => {
         requireValue(depth <= 24 && songs.length < 100_000, "library_limit");
         const entries = await fs.readdir(directory, { withFileTypes: true });
         for (const entry of entries) {
@@ -47,7 +50,7 @@ export class Library {
           assets.push(asset);
           const stem = path.basename(entry.name, path.extname(entry.name));
           const separator = stem.indexOf(" - ");
-          const song = {
+          const song: Song = {
             id,
             title: separator >= 0 ? stem.slice(separator + 3) : stem,
             artist: separator >= 0 ? stem.slice(0, separator) : "",
@@ -63,7 +66,7 @@ export class Library {
             assets.push(lyrics);
             song.lyricsId = lyrics.id;
           } catch (error) {
-            if (error.code !== "ENOENT") throw error;
+            if (serviceError(error).code !== "ENOENT") throw error;
           }
           songs.push(song);
         }
@@ -81,13 +84,13 @@ export class Library {
       this.status = { state: "complete", count: songs.length };
       return this.status;
     } catch (error) {
-      this.status = { state: "failed", error: error.code || "scan_failed" };
+      this.status = { state: "failed", error: serviceError(error).code || "scan_failed" };
       throw error;
     } finally {
       this.scanning = false;
     }
   }
-  async indexAsset(root, filename) {
+  async indexAsset(root: string, filename: string): Promise<Asset> {
     const canonical = await fs.realpath(filename);
     requireValue(inside(root, canonical), "outside_library", 403);
     const stat = await fs.stat(canonical);
@@ -101,7 +104,7 @@ export class Library {
       type: TYPES[path.extname(canonical).toLowerCase()],
     };
   }
-  async open(id) {
+  async open(id: string) {
     const asset = this.store.get("assets", id);
     requireValue(asset, "asset_not_found", 404);
     const root = await fs.realpath(this.directory);
@@ -128,7 +131,7 @@ export class Library {
       throw error;
     }
   }
-  search(query, offset = 0) {
+  search(query: string, offset = 0) {
     const pattern = `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
     const where =
       "WHERE (json_extract(value,'$.title') || ' ' || json_extract(value,'$.artist')) LIKE ? ESCAPE '\\'";
@@ -137,10 +140,10 @@ export class Library {
         `SELECT value FROM songs ${where} ORDER BY json_extract(value,'$.title'),id LIMIT 50 OFFSET ?`,
       )
       .all(pattern, offset)
-      .map((r) => JSON.parse(r.value));
+      .map((r) => JSON.parse(r.value as string) as Song);
     const total = this.store.db
       .prepare(`SELECT count(*) AS total FROM songs ${where}`)
-      .get(pattern).total;
+      .get(pattern)!.total;
     return { items, total, offset };
   }
 }

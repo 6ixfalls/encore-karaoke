@@ -60,11 +60,11 @@ DATA_DIR=/srv/encore/data npm run restore:server -- /srv/backups/encore-before-u
 Containers (run from `deploy/`; use a new backup destination each time):
 
 ```sh
-docker compose exec encore node server/operations.mjs backup /data/backups/before-upgrade
+docker compose exec encore node dist/server/operations.js backup /data/backups/before-upgrade
 docker compose cp encore:/data/backups/before-upgrade ./before-upgrade
 # Stop the ORIGINAL server and isolate all display outputs before restoring.
 docker compose stop encore
-docker compose run --rm -v "$PWD/before-upgrade:/backup:ro" encore node server/operations.mjs restore /backup
+docker compose run --rm -v "$PWD/before-upgrade:/backup:ro" encore node dist/server/operations.js restore /backup
 docker compose up -d encore
 ```
 

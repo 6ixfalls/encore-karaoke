@@ -40,10 +40,13 @@ The web server exposes no filesystem browser, arbitrary file API, native IPC bri
 
 ## Development and checks
 
+`npm run build` type-checks and compiles the server, then builds the browser assets. `npm start` and the backup/restore commands run the compiled server; build first after changing server sources. `npm run build:server` compiles only the server and shared contracts. Development mode watches server sources with `tsx`; `npm test` recompiles the server before testing the production output.
+
 ```sh
 npm run build
+npm run test:types
 npm test
-# Rebuild browser edits with npm run build; watch server edits:
+# Rebuild browser edits with npm run build; watch TypeScript server edits:
 npm run dev
 ```
 
@@ -51,8 +54,8 @@ Tests cover room authority, three concurrent Socket.IO controllers, reservation/
 
 ## Project layout
 
-- `server/`: standalone HTTP/Socket.IO service, auth, SQLite persistence, rooms, media, operations.
-- `shared/`: protocol version, command allowlist, validation, and defaults.
+- `server/`: strict TypeScript HTTP/Socket.IO service, auth, SQLite persistence, rooms, media, and operations; compiles to `dist/server/`.
+- `shared/`: TypeScript protocol version, command allowlist, validation, and defaults; compiles to `dist/shared/`.
 - `src/platform/`: explicit browser service adapter.
 - `src/hosted/`: display, controller, browser audio output gate, and shared LRC parser.
 - `deploy/`: non-root container and Caddy/Compose LAN HTTPS example.

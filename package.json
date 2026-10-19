@@ -4,16 +4,17 @@
   "description": "Self-hosted karaoke rooms with a browser display and same-origin phone controllers.",
   "type": "module",
   "scripts": {
-    "build": "node build-server.mjs",
-    "build:server": "npm run build",
-    "start": "node server/index.mjs",
+    "build": "npm run build:server && node build-server.mjs",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/index.js",
     "start:server": "npm start",
-    "dev": "npm run build && node --watch server/index.mjs",
+    "dev": "npm run build && tsx watch server/index.ts",
     "test": "npm run lint && npm run test:server",
-    "test:server": "node --test tests/server/*.test.mjs",
+    "test:server": "npm run build:server && node --test tests/server/*.test.mjs",
     "lint": "eslint server shared src/hosted src/platform tests/server build-server.mjs eslint.config.js",
-    "backup:server": "node server/operations.mjs backup",
-    "restore:server": "node server/operations.mjs restore"
+    "backup:server": "node dist/server/operations.js backup",
+    "restore:server": "node dist/server/operations.js restore",
+    "test:types": "tsc -p tsconfig.server.json --noEmit"
   },
   "repository": {
     "type": "git",
@@ -33,15 +34,21 @@
   },
   "dependencies": {
     "express": "^5.2.1",
-    "socket.io": "^4.8.3",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
     "@eslint/js": "^10.0.1",
-    "globals": "^17.11.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "@types/qrcode": "^1.5.6",
+    "esbuild": "0.28.2",
     "eslint": "^10.0.1",
-    "socket.io-client": "^4.8.3"
+    "globals": "^17.11.0",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2"
   },
   "engines": {
     "node": ">=22.15.0"

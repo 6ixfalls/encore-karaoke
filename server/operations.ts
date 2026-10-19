@@ -1,16 +1,18 @@
+import { serviceError } from "./types.js";
+import type { Room } from "./types.js";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { secret } from "./secrets.mjs";
+import { secret } from "./secrets.js";
 import { SCHEMA_VERSION, requireValue } from "../shared/contracts.js";
 
-export function assertStopped(directory) {
+export function assertStopped(directory: string) {
   const unlock = lock(directory);
   unlock();
 }
-export function lock(directory) {
+export function lock(directory: string) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   // Kernel-backed SQLite locks work across container PID namespaces and release on
   // crashes. A PID file can mistake a new container's PID 1 for the old server.
@@ -19,12 +21,12 @@ export function lock(directory) {
     db.exec("PRAGMA busy_timeout=0; CREATE TABLE IF NOT EXISTS singleton(id INTEGER); BEGIN EXCLUSIVE;");
   } catch (error) {
     db.close();
-    if (error.errcode === 5 || error.message.includes("locked")) throw new Error("Stop the Encore server before this operation", { cause: error });
+    if (serviceError(error).errcode === 5 || serviceError(error).message.includes("locked")) throw new Error("Stop the Encore server before this operation", { cause: error });
     throw error;
   }
   return () => { db.exec("ROLLBACK"); db.close(); };
 }
-function sync(filename) {
+function sync(filename: string) {
   const fd = fs.openSync(filename, "r");
   try {
     fs.fsyncSync(fd);
@@ -32,17 +34,17 @@ function sync(filename) {
     fs.closeSync(fd);
   }
 }
-function checksum(filename) {
+function checksum(filename: string) {
   return createHash("sha256").update(fs.readFileSync(filename)).digest("hex");
 }
-function validate(filename, { supportedSchema = true } = {}) {
+function validate(filename: string, { supportedSchema = true } = {}) {
   const db = new DatabaseSync(filename, { readOnly: true });
   try {
     requireValue(
-      db.prepare("PRAGMA integrity_check").get().integrity_check === "ok",
+      db.prepare("PRAGMA integrity_check").get()!.integrity_check === "ok",
       "invalid_backup",
     );
-    const schema = db.prepare("PRAGMA user_version").get().user_version;
+    const schema = Number(db.prepare("PRAGMA user_version").get()!.user_version);
     if (supportedSchema) {
       requireValue(
         schema >= 1 && schema <= SCHEMA_VERSION,
@@ -66,8 +68,8 @@ function validate(filename, { supportedSchema = true } = {}) {
   }
 }
 export function backup(
-  directory,
-  destination,
+  directory: string,
+  destination: string,
   { archiveUnknownSchema = false } = {},
 ) {
   requireValue(!fs.existsSync(destination), "backup_destination_exists");
@@ -99,7 +101,7 @@ export function backup(
   sync(destination);
   return metadata;
 }
-export function restore(directory, source) {
+export function restore(directory: string, source: string) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const unlock = lock(directory);
   const target = path.join(directory, "encore.sqlite");
@@ -142,7 +144,7 @@ export function restore(directory, source) {
         "DELETE FROM sessions; DELETE FROM invites; DELETE FROM commands; DELETE FROM attempts;",
       );
       for (const row of db.prepare("SELECT id,value FROM rooms").all()) {
-        const room = JSON.parse(row.value);
+        const room = JSON.parse(row.value as string) as Room;
         room.members = {};
         room.desired = "paused";
         room.observed = "unavailable";
@@ -190,7 +192,7 @@ if (
   const [action, destination] = process.argv.slice(2);
   requireValue(
     ["backup", "restore"].includes(action) && destination,
-    "usage: node server/operations.mjs backup|restore DIRECTORY",
+    "usage: node dist/server/operations.js backup|restore DIRECTORY",
   );
   const result =
     action === "backup"

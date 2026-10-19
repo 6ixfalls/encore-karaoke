@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store } from "../../server/store.mjs";
-import { Rooms } from "../../server/rooms.mjs";
-import { Auth } from "../../server/auth.mjs";
-import { backup, restore, lock } from "../../server/operations.mjs";
+import { Store } from "../../dist/server/store.js";
+import { Rooms } from "../../dist/server/rooms.js";
+import { Auth } from "../../dist/server/auth.js";
+import { backup, restore, lock } from "../../dist/server/operations.js";
 import { parseLrc } from "../../src/hosted/lrc.js";
 
 function setup(t) {

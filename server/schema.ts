@@ -1,7 +1,8 @@
+import type { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { SCHEMA_VERSION, requireValue } from "../shared/contracts.js";
-import { backup } from "./operations.mjs";
-import { secret } from "./secrets.mjs";
+import { backup } from "./operations.js";
+import { secret } from "./secrets.js";
 
 export const MIGRATIONS = [
   `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -21,8 +22,8 @@ export const MIGRATIONS = [
    CREATE INDEX songs_title ON songs(json_extract(value,'$.title'),id);`,
 ];
 
-export function migrate(db, directory, migrations = MIGRATIONS) {
-  const version = db.prepare("PRAGMA user_version").get().user_version;
+export function migrate(db: DatabaseSync, directory: string, migrations = MIGRATIONS) {
+  const version = Number(db.prepare("PRAGMA user_version").get()!.user_version);
   requireValue(version <= SCHEMA_VERSION, "unsupported_schema", 503);
   if (version === SCHEMA_VERSION) return;
   if (version > 0)

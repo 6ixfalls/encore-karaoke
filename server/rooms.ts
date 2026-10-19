@@ -1,3 +1,5 @@
+import type { Store } from "./store.js";
+import type { Room, Session, Invitation, Command, CommandResult, Telemetry, Retirement } from "./types.js";
 import { randomUUID, randomInt } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import {
@@ -8,22 +10,24 @@ import {
   text,
   number,
 } from "../shared/contracts.js";
-import { secret, digest } from "./store.mjs";
+import { secret, digest } from "./store.js";
 
 export class Rooms {
+  clock: () => number;
+  monotonic: () => number;
+  deadlines: Map<string, number>;
   constructor(
-    store,
+    private store: Store,
     { clock = Date.now, monotonic = () => performance.now() } = {},
   ) {
-    this.store = store;
     this.clock = clock;
     this.monotonic = monotonic;
     this.deadlines = new Map();
   }
-  host(session) {
+  host(session: Session) {
     return ["host", "admin"].includes(session.role);
   }
-  room(id, session, { ended = false } = {}) {
+  room(id: string, session: Session | null, { ended = false } = {}) {
     const room = this.store.get("rooms", id);
     requireValue(
       room && (ended || room.status !== "ended"),
@@ -46,14 +50,14 @@ export class Rooms {
     );
     return room;
   }
-  create(session, name) {
+  create(session: Session, name: unknown) {
     requireValue(this.host(session), "forbidden", 403);
     requireValue(
       this.store.all("rooms").filter((r) => r.status !== "ended").length < 32,
       "room_limit",
       409,
     );
-    const room = {
+    const room: Room = {
       id: randomUUID(),
       name: text(name),
       ownerPrincipal: session.principal,
@@ -79,7 +83,7 @@ export class Rooms {
     this.store.put("rooms", room.id, room);
     return room;
   }
-  snapshot(room, session) {
+  snapshot(room: Room, session: Session) {
     return {
       protocol: 1,
       id: room.id,
@@ -110,16 +114,16 @@ export class Rooms {
       canControl: this.host(session) || room.policy.guestControl,
     };
   }
-  invite(roomId, session, kind = "guest") {
+  invite(roomId: string, session: Session, kind: unknown = "guest") {
     this.room(roomId, session);
     requireValue(this.host(session), "forbidden", 403);
-    requireValue(["guest", "display"].includes(kind));
+    requireValue(kind === "guest" || kind === "display");
     const invitation = secret();
     let code;
     do {
       code = String(randomInt(100000, 1000000));
     } while (this.store.get("invites", digest(code)));
-    const value = {
+    const value: Invitation = {
       roomId,
       epoch: this.store.authEpoch,
       expires: this.clock() + 15 * 60_000,
@@ -143,7 +147,7 @@ export class Rooms {
       expires: value.expires,
     };
   }
-  join(invitation, session) {
+  join(invitation: unknown, session: Session) {
     return this.store.transaction(() => {
       const grant = this.store.get("invites", digest(text(invitation, 128)));
       requireValue(
@@ -179,7 +183,7 @@ export class Rooms {
       return room;
     });
   }
-  command(roomId, session, command) {
+  command(roomId: string, session: Session, command: Command): CommandResult {
     requireValue(command && typeof command === "object");
     text(command.commandId, 100);
     requireValue(COMMANDS.has(command.type), "unknown_command");
@@ -206,7 +210,7 @@ export class Rooms {
           status: 429,
           retryAfterMs,
         };
-      let result;
+      let result: CommandResult;
       try {
         if (command.type === "enqueue") this.admit(room, session);
         if (command.expectedRevision !== undefined)
@@ -242,7 +246,7 @@ export class Rooms {
       return result;
     });
   }
-  admitCommand(session) {
+  admitCommand(session: Session) {
     const now = this.clock();
     const device = `command:${session.id}`;
     // Separate namespaces keep general command budgets independent of enqueue admission.
@@ -252,15 +256,15 @@ export class Rooms {
     ).all(now - LIMITS.windowMs);
     const own = attempts.filter((a) => a.device === device);
     if (own.length >= LIMITS.commandDeviceRate)
-      return LIMITS.windowMs - (now - own[0].time);
+      return LIMITS.windowMs - (now - Number(own[0].time));
     if (attempts.length >= LIMITS.commandGlobalRate)
-      return LIMITS.windowMs - (now - attempts[0].time);
+      return LIMITS.windowMs - (now - Number(attempts[0].time));
     // Over-budget requests return above without writing or caching another rejection.
     this.store.db.prepare("DELETE FROM attempts WHERE time<=?").run(now - LIMITS.windowMs);
     this.store.db.prepare("INSERT INTO attempts(device,room,time) VALUES(?,'commands',?)").run(device, now);
     return 0;
   }
-  admit(room, session) {
+  admit(room: Room, session: Session) {
     requireValue(session.role !== "display", "forbidden", 403);
     const db = this.store.db,
       now = this.clock();
@@ -295,8 +299,8 @@ export class Rooms {
         429,
         LIMITS.windowMs -
           Math.min(
-            deviceLimited ? device[0].time : now,
-            roomLimited ? total[0].time : now,
+            deviceLimited ? Number(device[0].time) : now,
+            roomLimited ? Number(total[0].time) : now,
           ) +
           now,
       );
@@ -310,7 +314,7 @@ export class Rooms {
         409,
       );
   }
-  apply(room, session, type, p) {
+  apply(room: Room, session: Session, type: string, p: Record<string, unknown>) {
     const host = this.host(session);
     if (type === "enqueue") {
       requireValue(room.status === "open" || host, "room_locked", 403);
@@ -331,7 +335,7 @@ export class Rooms {
       requireValue(item, "reservation_not_found", 404);
       requireValue(host || item.owner === session.id, "forbidden", 403);
       room.queue = room.queue.filter((q) => q.id !== p.id);
-      if (room.current?.reservationId === p.id && !room.current.confirmed) {
+      if (room.current && room.current.reservationId === p.id && !room.current.confirmed) {
         room.current = null;
         room.desired = "paused";
         room.observed = "ready";
@@ -352,7 +356,7 @@ export class Rooms {
             new Set(p.ids).size === room.queue.length &&
             p.ids.every((id) => room.queue.some((q) => q.id === id)),
         );
-        room.queue = p.ids.map((id) => room.queue.find((q) => q.id === id));
+        room.queue = p.ids.map((id) => room.queue.find((q) => q.id === id)!);
         break;
       }
       case "play":
@@ -368,7 +372,7 @@ export class Rooms {
         requireValue(this.available(room), "display_unavailable", 409);
         if (room.current)
           room.queue = room.queue.filter(
-            (q) => q.id !== room.current.reservationId,
+            (q) => q.id !== room.current!.reservationId,
           );
         this.next(room);
         break;
@@ -436,7 +440,7 @@ export class Rooms {
         break;
     }
   }
-  next(room) {
+  next(room: Room) {
     const item = room.queue[0];
     room.current = item
       ? {
@@ -450,9 +454,9 @@ export class Rooms {
     room.observed = item ? "loading" : "idle";
     if (!item) room.desired = "paused";
   }
-  available(room) {
+  available(room: Room): room is Room & { lease: NonNullable<Room["lease"]> } {
     const lease = room.lease;
-    return (
+    return !!(
       !room.recoveryRequired &&
       lease &&
       !lease.retired &&
@@ -461,7 +465,7 @@ export class Rooms {
       (this.deadlines.get(lease.generation) || 0) > this.monotonic()
     );
   }
-  claim(roomId, session) {
+  claim(roomId: string, session: Session) {
     return this.store.transaction(() => {
       const room = this.room(roomId, session);
       requireValue(
@@ -507,7 +511,7 @@ export class Rooms {
       };
     });
   }
-  renew(roomId, session, generation) {
+  renew(roomId: string, session: Session, generation: string) {
     return this.store.transaction(() => {
       const room = this.room(roomId, session);
       requireValue(
@@ -523,7 +527,7 @@ export class Rooms {
       return { generation, leaseMs: LIMITS.leaseMs };
     });
   }
-  release(roomId, generation, token) {
+  release(roomId: string, generation: string, token: unknown) {
     const room = this.store.get("rooms", roomId);
     requireValue(
       room?.lease?.generation === generation &&
@@ -539,7 +543,7 @@ export class Rooms {
     this.deadlines.delete(generation);
     return room;
   }
-  retire(roomId, session, confirmation) {
+  retire(roomId: string, session: Session, confirmation: Retirement) {
     requireValue(session.role === "admin", "forbidden", 403);
     const room = this.room(roomId, session, { ended: true });
     requireValue(
@@ -582,7 +586,7 @@ export class Rooms {
     if (room.lease) this.deadlines.delete(room.lease.generation);
     return room;
   }
-  telemetry(roomId, session, message) {
+  telemetry(roomId: string, session: Session, message: Telemetry) {
     return this.store.transaction(() => {
       const room = this.room(roomId, session);
       requireValue(
@@ -617,7 +621,7 @@ export class Rooms {
         !room.current.confirmed
       ) {
         room.queue = room.queue.filter(
-          (q) => q.id !== room.current.reservationId,
+          (q) => q.id !== room.current!.reservationId,
         );
         room.current.confirmed = true;
       }

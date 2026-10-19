@@ -1,12 +1,12 @@
 # Server-hosted implementation status
 
-Implementation: October 18, 2026. This checkout replaces the Electron entrypoint and packaging workflow with a standalone Node/Express/Socket.IO server. `npm run build` compiles the hosted frontend; `npm start` runs the headless service. The original renderer modules remain available as reference for later playback work, but are neither built nor served. The [architecture draft](server-hosted-overhaul-draft.md) remains the broader delivery plan; this document records the implemented MP3/LRC slice and outstanding gates rather than declaring the entire roadmap complete.
+Implementation: October 18, 2026. This checkout replaces the Electron entrypoint and packaging workflow with a standalone Node/Express/Socket.IO server. `npm run build` type-checks and compiles the TypeScript server and shared contracts, then builds the hosted frontend; `npm start` runs the headless service. The original renderer modules remain available as reference for later playback work, but are neither built nor served. The [architecture draft](server-hosted-overhaul-draft.md) remains the broader delivery plan; this document records the implemented MP3/LRC slice and outstanding gates rather than declaring the entire roadmap complete.
 
 ## Implemented
 
 | Area | Available behavior |
 | --- | --- |
-| Server and build | No Electron/native runtime dependency; Node 24 container target; three production packages; independent browser build with local scripts/fonts/icons/QR generation; default build/start and CI use the headless path |
+| Server and build | Strict TypeScript server compiled to `dist/server`; no Electron/native runtime dependency; Node 24 container target; three production packages; independent browser build with local scripts/fonts/icons/QR generation; default build/start and CI use the headless path |
 | Authentication | Provisioned admin and host credentials; durable revocable device sessions; Secure/HttpOnly/SameSite cookies; exact Origin and CSRF checks; persistent authentication epochs; role/capability checks on HTTP and Socket.IO |
 | Rooms | Room creation, lock/end, expiring and rotatable guest QR/manual invitation exchange, single-use display pairing, device revocation, snapshots/reconnect, credential-based host ownership, multiple rooms with isolated authority |
 | Queue | SQLite serialization and transactions; configurable guest/room reservation caps; rolling device/room enqueue limits including failed submissions and hosts; persistent device/server budgets for all fresh commands; 24-hour accepted-command deduplication across restarts, one-minute rejection retention, no retry record for over-budget requests; expected revisions; original cached retry results; explicit overload errors without automatic retries |

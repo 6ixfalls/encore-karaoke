@@ -1,18 +1,37 @@
+import type { Store } from "./store.js";
+import type { Configuration } from "./config.js";
+import type { Session, Command, Telemetry } from "./types.js";
+import { serviceError } from "./types.js";
+import type { Request, Response, NextFunction } from "express";
+import type { Socket } from "socket.io";
+import type { FileHandle } from "node:fs/promises";
+import type { ReadStream } from "node:fs";
+
+declare module "express-serve-static-core" {
+  interface Request {
+    session: Session | null;
+  }
+}
+
 import express from "express";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
-import { Auth } from "./auth.mjs";
-import { Rooms } from "./rooms.mjs";
-import { Library } from "./library.mjs";
+import { Auth } from "./auth.js";
+import { Rooms } from "./rooms.js";
+import { Library } from "./library.js";
 import { Fault, requireValue, text, number } from "../shared/contracts.js";
 
-export function createApplication(store, config) {
+export function createApplication(store: Store, config: Configuration) {
   const app = express(),
     http = createServer(app);
   const auth = new Auth(store, config),
     rooms = new Rooms(store),
     library = new Library(store, config.library);
+  const authenticated = (req: Request): Session => {
+    requireValue(req.session, "unauthorized", 401);
+    return req.session;
+  };
   let transfers = 0;
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustedProxies?.length ? config.trustedProxies : false);
@@ -77,11 +96,11 @@ export function createApplication(store, config) {
     publish(room.id);
   });
   app.use("/api", (req, _res, next) => {
-    requireValue(req.session, "unauthorized", 401);
+    authenticated(req);
     next();
   });
   app.get("/api/session", (req, res) => {
-    const s = req.session;
+    const s = authenticated(req);
     res.json({
       id: s.id,
       role: s.role,
@@ -102,16 +121,16 @@ export function createApplication(store, config) {
     });
   });
   app.post("/api/logout", (req, res) => {
-    req.session.revoked = true;
-    store.put("sessions", req.session.tokenHash, req.session);
+    authenticated(req).revoked = true;
+    store.put("sessions", authenticated(req).tokenHash, authenticated(req));
     res
       .set(
         "Set-Cookie",
         `encore_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${config.secure ? "; Secure" : ""}`,
       )
       .json({ ok: true });
-    for (const r of store.all("rooms").filter((r) => r.members[req.session.id])) {
-      delete r.members[req.session.id];
+    for (const r of store.all("rooms").filter((r) => r.members[authenticated(req).id])) {
+      delete r.members[authenticated(req).id];
       r.revision++;
       store.put("rooms", r.id, r);
       publish(r.id);
@@ -121,16 +140,16 @@ export function createApplication(store, config) {
     res
       .status(201)
       .json(
-        rooms.snapshot(rooms.create(req.session, req.body.name), req.session),
+        rooms.snapshot(rooms.create(authenticated(req), req.body.name), authenticated(req)),
       ),
   );
   app.get("/api/rooms/:roomId", (req, res) =>
     res.json(
-      rooms.snapshot(rooms.room(req.params.roomId, req.session), req.session),
+      rooms.snapshot(rooms.room(req.params.roomId, authenticated(req)), authenticated(req)),
     ),
   );
   app.post("/api/rooms/:roomId/invitations", async (req, res) => {
-    const grant = rooms.invite(req.params.roomId, req.session, req.body.kind);
+    const grant = rooms.invite(req.params.roomId, authenticated(req), req.body.kind);
     // Fragment secrets never enter the access log or the Referer header.
     const url = `${config.origin}/#invite=${grant.invitation}`;
     res.json({
@@ -140,44 +159,44 @@ export function createApplication(store, config) {
     });
   });
   app.post("/api/rooms/:roomId/commands", (req, res) => {
-    const ack = rooms.command(req.params.roomId, req.session, req.body);
+    const ack = rooms.command(req.params.roomId, authenticated(req), req.body);
     if (ack.retryAfterMs)
       res.set("Retry-After", String(Math.ceil(ack.retryAfterMs / 1000)));
-    res.status(ack.accepted ? 200 : ack.status).json(ack);
+    res.status(ack.accepted ? 200 : ack.status ?? 400).json(ack);
     publish(req.params.roomId);
   });
   app.post("/api/rooms/:roomId/display/claim", (req, res) => {
-    const grant = rooms.claim(req.params.roomId, req.session);
+    const grant = rooms.claim(req.params.roomId, authenticated(req));
     res.status(grant.pending ? 409 : 200).json(grant);
     publish(req.params.roomId);
   });
   app.post("/api/rooms/:roomId/display/renew", (req, res) =>
-    res.json(rooms.renew(req.params.roomId, req.session, req.body.generation)),
+    res.json(rooms.renew(req.params.roomId, authenticated(req), req.body.generation)),
   );
   app.post("/api/admin/rooms/:roomId/retire", (req, res) => {
-    const room = rooms.retire(req.params.roomId, req.session, req.body);
+    const room = rooms.retire(req.params.roomId, authenticated(req), req.body);
     res.json({ ok: true });
     publish(room.id);
   });
   app.post("/api/admin/library/rescan", (req, res) => {
-    requireValue(req.session.role === "admin", "forbidden", 403);
+    requireValue(authenticated(req).role === "admin", "forbidden", 403);
     requireValue(!library.scanning, "scan_in_progress", 409);
     library.scan().catch(() => {});
     res.status(202).json({ state: "scanning" });
   });
   app.get("/api/admin/library", (req, res) => {
-    requireValue(req.session.role === "admin", "forbidden", 403);
+    requireValue(authenticated(req).role === "admin", "forbidden", 403);
     res.json(library.status);
   });
   app.get("/api/library/search", (req, res) => {
-    rooms.room(String(req.query.roomId || ""), req.session);
+    rooms.room(String(req.query.roomId || ""), authenticated(req));
     const q = req.query.q || "";
     requireValue(typeof q === "string" && q.length <= 200);
     const offset = number(Number(req.query.offset || 0), 0, 100_000);
     res.json(library.search(q, Math.floor(offset)));
   });
   app.get("/api/library/songs/:id", (req, res) => {
-    rooms.room(String(req.query.roomId || ""), req.session);
+    rooms.room(String(req.query.roomId || ""), authenticated(req));
     const song = store.get("songs", req.params.id);
     requireValue(song, "song_not_found", 404);
     res.json(song);
@@ -194,12 +213,12 @@ export function createApplication(store, config) {
     publish(room.id);
   });
   app.get("/media/:id", async (req, res) => {
-    requireValue(req.session, "unauthorized", 401);
-    rooms.room(String(req.query.roomId || ""), req.session);
+    authenticated(req);
+    rooms.room(String(req.query.roomId || ""), authenticated(req));
     requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
     transfers++;
-    let handle;
-    let stream;
+    let handle: FileHandle | undefined;
+    let stream: ReadStream | undefined;
     let finished = false;
     const finish = () => {
       if (finished) return;
@@ -286,7 +305,8 @@ export function createApplication(store, config) {
     }),
   );
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
-  app.use((error, _req, res, _next) => {
+  app.use((caught: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const error = serviceError(caught);
     if (res.headersSent) return res.destroy();
     const status =
       error instanceof Fault
@@ -333,22 +353,22 @@ export function createApplication(store, config) {
     socket.data.sessionId = session.id;
     next();
   });
-  const socketSession = (socket) => {
+  const socketSession = (socket: Socket) => {
     const s = auth.session(socket.request.headers.cookie);
-    requireValue(s?.id === socket.data.sessionId, "unauthorized", 401);
+    requireValue(s && s.id === socket.data.sessionId, "unauthorized", 401);
     auth.throttle(`socket:${s.id}`, 600);
     return s;
   };
-  function publish(roomId) {
+  function publish(roomId: string) {
     for (const socket of io.sockets.sockets.values()) {
       if (socket.data.roomId !== roomId) continue;
       try {
         const s = auth.session(socket.request.headers.cookie);
         socket.emit(
           "room:state",
-          rooms.snapshot(rooms.room(roomId, s, { ended: true }), s),
+          rooms.snapshot(rooms.room(roomId, s, { ended: true }), s!),
         );
-        if (store.get("rooms", roomId).status === "ended")
+        if (store.get("rooms", roomId)?.status === "ended")
           socket.disconnect(true);
       } catch {
         socket.emit("session:revoked");
@@ -357,7 +377,7 @@ export function createApplication(store, config) {
     }
   }
   io.on("connection", (socket) => {
-    const handle = (event, fn) =>
+    const handle = <T>(event: string, fn: (message: T, session: Session) => unknown) =>
       socket.on(event, (message, callback) => {
         const reply = typeof callback === "function" ? callback : () => {};
         try {
@@ -366,24 +386,24 @@ export function createApplication(store, config) {
           reply({
             accepted: false,
             error: error instanceof Fault ? error.code : "invalid_request",
-            retryAfterMs: error.retryAfterMs,
+            retryAfterMs: serviceError(error).retryAfterMs,
           });
         }
       });
-    handle("room:subscribe", (message, session) => {
+    handle<{ roomId?: unknown }>("room:subscribe", (message, session) => {
       const room = rooms.room(text(message?.roomId, 100), session);
       socket.data.roomId = room.id;
       const snapshot = rooms.snapshot(room, session);
       socket.emit("room:state", snapshot);
       return snapshot;
     });
-    handle("room:command", (message, session) => {
+    handle<Command>("room:command", (message, session) => {
       requireValue(socket.data.roomId, "room_required");
       const ack = rooms.command(socket.data.roomId, session, message);
       publish(socket.data.roomId);
       return ack;
     });
-    handle("display:telemetry", (message, session) => {
+    handle<Telemetry>("display:telemetry", (message, session) => {
       requireValue(message && socket.data.roomId, "room_required");
       rooms.telemetry(socket.data.roomId, session, message);
       publish(socket.data.roomId);
@@ -430,7 +450,7 @@ export function createApplication(store, config) {
     publish,
     async close() {
       clearInterval(sweep);
-      await new Promise((resolve) => io.close(resolve));
+      await new Promise<void>((resolve) => io.close(() => resolve()));
       store.close();
     },
   };

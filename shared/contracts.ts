@@ -28,7 +28,10 @@ export const COMMANDS = new Set([
 ]);
 
 export class Fault extends Error {
-  constructor(code, status = 400, retryAfterMs) {
+  code: string;
+  status: number;
+  retryAfterMs?: number;
+  constructor(code: string, status = 400, retryAfterMs?: number) {
     super(code);
     this.code = code;
     this.status = status;
@@ -36,19 +39,19 @@ export class Fault extends Error {
   }
 }
 export function requireValue(
-  condition,
+  condition: unknown,
   code = "invalid_request",
   status = 400,
-) {
+): asserts condition {
   if (!condition) throw new Fault(code, status);
 }
-export function text(value, max = 80) {
+export function text(value: unknown, max = 80) {
   requireValue(
     typeof value === "string" && value.trim().length > 0 && value.length <= max,
   );
   return value.trim();
 }
-export function number(value, min, max) {
-  requireValue(Number.isFinite(value) && value >= min && value <= max);
+export function number(value: unknown, min: number, max: number) {
+  requireValue(typeof value === "number" && Number.isFinite(value) && value >= min && value <= max);
   return value;
 }
