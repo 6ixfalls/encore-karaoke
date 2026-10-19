@@ -40,6 +40,8 @@ The web server exposes no filesystem browser, arbitrary file API, native IPC bri
 
 ## Development and checks
 
+The Container GitHub Actions workflow runs the build, lint, and tests before building Linux AMD64 and ARM64 images with `deploy/Dockerfile`. Branch pushes and same-repository pull requests publish to `ghcr.io/6ixfalls/encore-karaoke` with `sha-<commit>`, branch, and `pr-<number>` tags as applicable; the default branch also updates `latest`. Fork pull requests build without publishing. Images include provenance and an SBOM. The workflow uses `GITHUB_TOKEN` with package write permission and creates no version tags, changelogs, or GitHub releases.
+
 `npm run build` type-checks and compiles the server, then builds the browser assets. `npm start` and the backup/restore commands run the compiled server; build first after changing server sources. `npm run build:server` compiles only the server and shared contracts. Development mode watches server sources with `tsx`; `npm test` recompiles the server before testing the production output.
 
 ```sh
