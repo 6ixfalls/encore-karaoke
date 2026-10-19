@@ -1,0 +1,92 @@
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { secret, digest } from "./store.mjs";
+import { requireValue, text, Fault } from "../shared/contracts.js";
+
+export class Auth {
+  constructor(store, config) {
+    this.store = store;
+    this.config = config;
+    this.attempts = new Map();
+  }
+  session(cookie = "") {
+    const token = cookie
+      .split(";")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith("encore_session="))
+      ?.slice(15);
+    const session = token && this.store.get("sessions", digest(token));
+    return session &&
+      !session.revoked &&
+      session.epoch === this.store.authEpoch &&
+      session.expires > Date.now()
+      ? session
+      : null;
+  }
+  create(role, nickname, principal) {
+    const token = secret();
+    const session = {
+      id: randomUUID(),
+      role,
+      nickname: text(nickname, 40),
+      csrf: secret(),
+      epoch: this.store.authEpoch,
+      principal:
+        principal ||
+        (["admin", "host"].includes(role)
+          ? digest(
+              `${role}:${role === "admin" ? this.config.adminKey : this.config.hostKey || this.config.adminKey}`,
+            )
+          : undefined),
+      expires: Date.now() + 7 * 86_400_000,
+      tokenHash: digest(token),
+      revoked: false,
+    };
+    this.store.put("sessions", session.tokenHash, session);
+    return {
+      session,
+      cookie: `encore_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${this.config.secure ? "; Secure" : ""}`,
+    };
+  }
+  login(key) {
+    requireValue(
+      typeof key === "string" && key.length <= 512,
+      "invalid_credentials",
+      401,
+    );
+    const equal = (expected) =>
+      expected &&
+      timingSafeEqual(Buffer.from(digest(key)), Buffer.from(digest(expected)));
+    if (equal(this.config.adminKey)) return "admin";
+    if (equal(this.config.hostKey)) return "host";
+    throw new Fault("invalid_credentials", 401);
+  }
+  origin(origin) {
+    requireValue(origin === this.config.origin, "invalid_origin", 403);
+  }
+  mutation(req) {
+    this.origin(req.headers.origin);
+    if (req.session)
+      requireValue(
+        req.headers["x-csrf-token"] === req.session.csrf,
+        "invalid_csrf",
+        403,
+      );
+  }
+  throttle(key, limit = 10) {
+    const now = Date.now();
+    for (const [k, times] of this.attempts)
+      if (times.at(-1) <= now - 60_000) this.attempts.delete(k);
+    requireValue(
+      this.attempts.size < 10_000 || this.attempts.has(key),
+      "rate_limited",
+      429,
+    );
+    const times = (this.attempts.get(key) || []).filter(
+      (t) => t > now - 60_000,
+    );
+    if (times.length >= limit)
+      throw new Fault("rate_limited", 429, 60_000 - (now - times[0]));
+    times.push(now);
+    this.attempts.set(key, times);
+  }
+}

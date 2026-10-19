@@ -1,4 +1,5 @@
 import Romanizer from "../../../modules/Romanizer.js";
+import { parseLrc } from "../../../hosted/lrc.js";
 
 const INTERLUDE_TIPS = [
   "”Maybe there's only a dark road up ahead. But you still have to believe and keep going. Believe that the stars will light your path, even a little bit.” - Kaori Miyazono, Your Lie in April",
@@ -796,27 +797,14 @@ export default class LyricsEngine {
   }
 
   async parseLrc(text) {
-    const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
-    if (!text) return [];
-    const lines = text.split("\n");
-    const promises = lines.map(async (line) => {
-      const match = line.match(regex);
-      if (!match) return null;
-      const time =
-        parseInt(match[1]) * 60 +
-        parseInt(match[2]) +
-        parseInt(match[3].padEnd(3, "0")) / 1000;
-      const txt = line.replace(regex, "").trim();
-      if (!txt) return null;
-
+    return Promise.all(parseLrc(text).map(async (line) => {
       let romanized = "";
-      if (this.asianRegex.test(txt)) {
-        romanized = await Romanizer.romanize(txt);
-        this.romajiCache[txt] = romanized;
+      if (this.asianRegex.test(line.text)) {
+        romanized = await Romanizer.romanize(line.text);
+        this.romajiCache[line.text] = romanized;
       }
-      return { time, text: txt, romanized };
-    });
-    return (await Promise.all(promises)).filter(Boolean);
+      return { ...line, romanized };
+    }));
   }
 
   async _resolveRomajiForLine(lineIndex) {

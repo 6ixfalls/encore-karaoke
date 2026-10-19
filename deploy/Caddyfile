@@ -1,0 +1,6 @@
+{$KARAOKE_HOST} {
+    # LAN-only provisioning: install Caddy's root CA on every display and phone.
+    # For a publicly issued certificate, remove this line and configure public DNS/ACME.
+    tls internal
+    reverse_proxy encore:3000
+}

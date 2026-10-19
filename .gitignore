@@ -140,3 +140,10 @@ dist/
 
 # proof-of-concept web version, will ignore for now
 ozone-layer/
+
+# Headless runtime and deployment credentials
+/data/
+/cache/
+/library/
+/deploy/secrets/
+/deploy/.env

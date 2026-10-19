@@ -1,106 +1,49 @@
 {
   "name": "encore-karaoke",
   "version": "1.15.0",
-  "description": "Turn your PC into a karaoke machine, complete with scoring and recording features. For karaoke fans, by karaoke fans. Runs offline.",
-  "main": "dist/main.js",
+  "description": "Self-hosted karaoke rooms with a browser display and same-origin phone controllers.",
   "type": "module",
   "scripts": {
-    "build": "npm run test:types && node build.js",
-    "build:dev": "node build.js --dev",
-    "start": "npm run build:dev && electron-forge start -- --dev",
-    "package": "npm run build && electron-forge package",
-    "make": "npm run build && electron-forge make",
-    "lint": "eslint .",
-    "test:types": "npm run lint && tsc -b"
+    "build": "node build-server.mjs",
+    "build:server": "npm run build",
+    "start": "node server/index.mjs",
+    "start:server": "npm start",
+    "dev": "npm run build && node --watch server/index.mjs",
+    "test": "npm run lint && npm run test:server",
+    "test:server": "node --test tests/server/*.test.mjs",
+    "lint": "eslint server shared src/hosted src/platform tests/server build-server.mjs eslint.config.js",
+    "backup:server": "node server/operations.mjs backup",
+    "restore:server": "node server/operations.mjs restore"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Encore-Karaoke-Labs/Encore-Karaoke"
   },
   "keywords": [
-    "htpc",
-    "web-os",
-    "movies",
-    "tv"
+    "karaoke",
+    "self-hosted",
+    "rooms",
+    "mp3",
+    "lrc"
   ],
   "author": "Encore Karaoke Labs",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/Encore-Karaoke-Labs/Encore-Karaoke/issues"
   },
-  "homepage": "./",
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.1",
-    "kuroshiro-analyzer-kuromoji": "^1.1.0",
-    "loudness": "^0.4.2",
-    "pdfkit": "^0.19.1",
-    "systeminformation": "^5.33.1"
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@electron-forge/cli": "^7.11.2",
-    "@electron-forge/maker-deb": "^7.11.2",
-    "@electron-forge/maker-dmg": "^7.11.2",
-    "@electron-forge/maker-rpm": "^7.11.2",
-    "@electron-forge/maker-squirrel": "^7.11.2",
-    "@electron-forge/maker-zip": "^7.11.2",
-    "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
-    "@electron-forge/plugin-fuses": "^7.4.0",
-    "@electron/fuses": "^1.8.0",
-    "@electron/rebuild": "4.2.0",
-    "@eslint/js": "^10.0.1",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/mime-types": "^3.0.1",
-    "@types/node": "^26.3.0",
-    "@types/pdfkit": "^0.17.6",
-    "@types/qrcode": "^1.5.6",
-    "@xhayper/discord-rpc": "^1.3.4",
-    "bonjour-service": "^1.4.4",
-    "cdgraphics": "^7.0.0",
-    "cors": "^2.8.6",
-    "dompurify": "^3.4.13",
-    "driver.js": "^1.8.0",
-    "electron": "^43.4.1",
-    "electron-packager-languages": "^0.6.0",
     "esbuild": "0.28.2",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-unicorn": "^73.0.0",
-    "express": "^5.2.1",
-    "ffmpeg-static": "^5.3.0",
-    "fuse.js": "^7.5.0",
+    "@eslint/js": "^10.0.1",
     "globals": "^17.11.0",
-    "ionicons": "^8.1.0",
-    "kuroshiro": "^1.2.0",
-    "localforage": "^1.10.0",
-    "marked": "^18.0.10",
-    "mime-types": "^3.0.2",
-    "obs-websocket-js": "^5.0.8",
-    "peerjs": "^1.5.5",
-    "pitchy": "^4.1.0",
-    "qrcode": "^1.5.4",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3",
-    "spessasynth_core": "^4.3.22",
-    "spessasynth_lib": "^4.3.14",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.68.0",
-    "youtube-search-api": "^2.0.1"
+    "eslint": "^10.0.1",
+    "socket.io-client": "^4.8.3"
   },
-  "overrides": {
-    "@electron/rebuild": "4.2.0",
-    "extract-zip": "npm:@electron-internal/extract-zip@1.0.5",
-    "tmp": "0.2.7"
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "electron-winstaller@5.4.4": true,
-    "ffmpeg-static": true
-  },
-  "lint-staged": {
-    "*.ts": [
-      "prettier --write",
-      "eslint --cache --fix"
-    ],
-    "*.{json,md,yml,yaml}": "prettier --write"
+  "engines": {
+    "node": ">=22.15.0"
   }
 }

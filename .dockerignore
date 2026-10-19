@@ -1,0 +1,8 @@
+.git
+node_modules
+data
+library
+dist
+deploy/secrets
+.env
+*.log

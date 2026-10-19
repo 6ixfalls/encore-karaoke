@@ -1,0 +1,55 @@
+services:
+  encore:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the trusted HTTPS origin}
+      ADMIN_KEY_FILE: /run/secrets/admin_key
+      HOST_KEY_FILE: /run/secrets/host_key
+      TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
+    secrets: [admin_key, host_key]
+    volumes:
+      - encore-data:/data
+      - encore-cache:/cache
+      - ${LIBRARY_DIR:?Set an absolute library path}:/library:ro
+    read_only: true
+    tmpfs: ["/tmp:size=64m,noexec,nosuid"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    cpus: 1.5
+    pids_limit: 100
+    expose: ["3000"]
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: ${ENCORE_PROXY_IP:-172.30.254.2}
+    environment:
+      KARAOKE_HOST: ${KARAOKE_HOST:?Set the hostname}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      encore:
+        condition: service_healthy
+secrets:
+  admin_key:
+    file: ./secrets/admin_key
+  host_key:
+    file: ./secrets/host_key
+volumes:
+  encore-data:
+  encore-cache:
+  caddy-data:
+  caddy-config:
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${ENCORE_NETWORK_SUBNET:-172.30.254.0/29}

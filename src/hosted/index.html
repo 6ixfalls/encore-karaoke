@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Encore · EnMoku</title>
+    <link rel="icon" href="/assets/icon.png" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/socket.io/socket.io.js" defer></script>
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <a href="/">ENCORE <span>EnMoku!</span></a
+      ><span id="connection" role="status">Connecting…</span
+      ><button id="logout" hidden>Sign out</button>
+    </header>
+    <main>
+      <p id="message" role="alert" aria-live="polite"></p>
+      <section id="welcome">
+        <h1>Your room. Your encore.</h1>
+        <p>
+          Open a room on your display, then let everyone choose the next song.
+        </p>
+        <div class="columns">
+          <form id="join-form" class="card">
+            <h2>Join karaoke</h2>
+            <label
+              >Nickname<input
+                id="nickname"
+                maxlength="40"
+                autocomplete="nickname"
+                required /></label
+            ><label
+              >Join code<input
+                id="join-code"
+                maxlength="128"
+                autocomplete="off"
+                required /></label
+            ><button>Join room</button>
+          </form>
+          <form id="login-form" class="card">
+            <h2>Host sign in</h2>
+            <label
+              >Host or administrator credential<input
+                id="credential"
+                type="password"
+                maxlength="512"
+                autocomplete="current-password"
+                required /></label
+            ><button>Sign in</button>
+            <p class="muted">
+              Your server operator provisions this credential. Opening this page
+              grants no host rights.
+            </p>
+          </form>
+        </div>
+      </section>
+      <section id="lobby" hidden>
+        <h1>Let’s sing.</h1>
+        <div id="rooms" class="cards"></div>
+        <form id="create-form" class="card" hidden>
+          <label
+            >Room name<input
+              id="room-name"
+              maxlength="80"
+              value="Encore room"
+              required /></label
+          ><button>Create room</button>
+        </form>
+      </section>
+      <section id="room" hidden>
+        <div class="room-heading">
+          <div>
+            <p class="eyebrow">KARAOKE ROOM</p>
+            <h1 id="room-title"></h1>
+          </div>
+          <button id="choose-room">Rooms</button>
+        </div>
+        <div class="stage card">
+          <p id="playback-status" class="eyebrow"></p>
+          <h2 id="now-title">Waiting for your first song</h2>
+          <p id="now-artist"></p>
+          <div id="lyrics" aria-live="off"></div>
+          <div id="next-lyrics"></div>
+          <p id="progress" class="muted"></p>
+          <div id="display-controls" hidden>
+            <button id="start-display">Start karaoke on this display</button
+            ><button id="stop-display" hidden>Release display</button
+            ><button id="fullscreen">Fullscreen</button>
+            <p class="muted">
+              Start enables browser audio. Keep this tab visible while singing.
+            </p>
+          </div>
+          <div id="play-controls" hidden class="controls">
+            <button id="play">Play / resume</button
+            ><button id="pause">Pause</button><button id="skip">Skip</button
+            ><label
+              >Volume<input
+                id="volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05" /></label
+            ><label
+              >Tempo<input
+                id="tempo"
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.05"
+            /></label>
+            <form id="seek-form">
+              <label
+                >Seek (seconds)<input
+                  id="seek"
+                  type="number"
+                  min="0"
+                  max="86400"
+                  value="0" /></label
+              ><button>Seek</button>
+            </form>
+          </div>
+        </div>
+        <div class="columns">
+          <section class="card">
+            <h2>Songbook</h2>
+            <form id="search-form">
+              <label
+                >Find your song<input
+                  id="search"
+                  type="search"
+                  maxlength="200"
+                  placeholder="Song or artist" /></label
+              ><button>Search</button>
+            </form>
+            <p id="search-count" class="muted"></p>
+            <div id="songs"></div>
+            <button id="more" hidden>Load more</button>
+          </section>
+          <section class="card">
+            <h2>Up next</h2>
+            <p class="muted">
+              Reservations are shared with everyone in this room.
+            </p>
+            <ol id="queue"></ol>
+            <h3>In the room</h3>
+            <div id="participants"></div>
+          </section>
+        </div>
+        <section id="host-tools" class="card" hidden>
+          <h2>Room controls</h2>
+          <div class="controls">
+            <button id="invite">Refresh guest invitation</button
+            ><button id="pair-display">Pair another display</button
+            ><button id="lock">Lock room</button
+            ><button id="end" class="danger">End room</button>
+          </div>
+          <div id="invitation" hidden>
+            <img
+              id="qr"
+              alt="Scan to join this room"
+              width="256"
+              height="256"
+            />
+            <div>
+              <h3 id="invite-label">Join the room</h3>
+              <p id="manual-code"></p>
+              <a id="join-link" rel="noreferrer"></a>
+              <p id="invite-expires" class="muted"></p>
+            </div>
+          </div>
+          <form id="policy-form" class="controls">
+            <label
+              >Reservations per guest<input
+                id="guest-cap"
+                type="number"
+                min="1"
+                max="100" /></label
+            ><label id="room-cap-label"
+              >Room capacity<input
+                id="room-cap"
+                type="number"
+                min="1"
+                max="1000" /></label
+            ><label
+              ><input id="guest-control" type="checkbox" /> Allow guests to
+              play, pause, and skip</label
+            ><button>Save policy</button>
+          </form>
+        </section>
+        <section id="admin-tools" class="card" hidden>
+          <h2>Server administration</h2>
+          <button id="scan">Rescan mounted library</button
+          ><button id="scan-status">Indexing status</button>
+          <details>
+            <summary>Physically retire a lost display</summary>
+            <p>
+              Use only after powering off or physically disconnecting the audio
+              output of the old device. Keep it isolated until its old browser
+              is terminated and pairing is cleared. After a restore, isolate
+              every possibly outstanding display, including devices paired after
+              the backup.
+            </p>
+            <p id="retire-generation" class="monospace"></p>
+            <form id="retire-form">
+              <label
+                ><input id="isolated" type="checkbox" required /> The old output
+                is physically isolated</label
+              ><label
+                ><input id="terminated" type="checkbox" required /> The old
+                browser is terminated and its pairing is cleared</label
+              ><label
+                ><input id="all-isolated" type="checkbox" required /> Every
+                possibly outstanding display is isolated</label
+              ><button class="danger">Confirm physical retirement</button>
+            </form>
+          </details>
+        </section>
+      </section>
+      <footer>
+        Self-hosted karaoke · MP3 + LRC · Phone microphones are pending hardware
+        validation
+      </footer>
+    </main>
+  </body>
+</html>

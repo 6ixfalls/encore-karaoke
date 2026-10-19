@@ -1,223 +1,61 @@
-<div align="center">
-  <img alt="Encore Header" src="readme/header.png" style="border-radius: 15px; margin-bottom: 20px;" />
+# Encore Karaoke
 
-# Encore Karaoke Player
+Self-hosted karaoke with a browser display and EnMoku phone controllers. The server runs without Electron, a desktop environment, an audio device, or external relay services. It owns rooms, library indexing, authorization, and queues; the display browser owns playback and lyric timing.
 
-**Experience the ultimate Asian karaoke box right on your computer, with your own music!**
+The implemented hosted path supports **MP3 with optional companion LRC**. The [overhaul draft](docs/server-hosted-overhaul-draft.md) describes the larger roadmap. [Implementation status and remaining release gates](docs/server-hosted-implementation.md) distinguish completed code from work still required before release. MIDI, CD+G, conversion, scoring, recording, and phone microphones are not enabled in this hosted build.
 
-![Version badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fversioning.encorekaraoke.org%2FversionInfo&query=%24.number&prefix=v&label=version&color=%2389CFF0)
-![Channel badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fversioning.encorekaraoke.org%2FversionInfo&query=%24.channel&label=channel&color=%23FFD700)
+## Run locally
 
-</div>
+Use Node.js 24 LTS (Node 22.15 or later has the required SQLite API).
 
-<div align="center">
-  <img alt="Encore Header" src="readme/demo.jpg" style="border-radius: 15px; margin-bottom: 20px; margin-top: 20px;" />
-</div>
-
----
-
-## Key Features
-
-### Core Singing Experience
-
-- **Real-Time Scoring**
-  - With our **Forte Audio Engine** powered by the Web Audio API, Encore actively listens to your microphone.
-  - Features live pitch tracking, real-time key-modulation detection, and a visual pitch guide overlay so you know exactly when to hit those high notes (only in Multiplex & MIDI tracks).
-- **Pitch & Latency Control**
-  - Adjust pitch (transpose) and tempo on the fly.
-  - Calibrate your microphone and signal chain's latency quickly.
-- **Japanese & Korean Romanization**
-  - Love singing K-pop but can't read the language? What about your favorite anime openings? Encore automatically generates romanized lyrics for Japanese and Korean in real time.
-  - Also supports Furigana (Ruby text) for MIDI karaoke files.
-
-### Social & Remote Karaoke
-
-- **Encore Sessions (Virtual Karaoke Rooms)**
-  - Sing with friends and family across the world with Encore Sessions! Perfect for OFWs, LDRs, or remote karaoke hangouts with friends!
-  - Queue, Cheer, and Chat in the room just like a real karaoke box.
-  - Have fun with a sprinkle of competition with a score leaderboard!
-  - Invite your friends without even having to send a link with Discord Game Invite support.
-- **EnMoku! (Mobile Remote Control)**
-  - No more passing a bulky songbook around! Just scan the QR code on the screen to connect your smartphone.
-  - No additional app installs needed! EnMoku works straight in your web browser. (Chromium-based browsers (e.g., Chrome, Edge) and Firefox)
-  - Queue tracks, send "Cheers", chat with the room, and turn your phone into a camera in one tap!
-  - Use your phone as a virtual shaker!
-  - Works seamlessly on your local network, with a Cloud tunnel fallback for devices not on the same network.
-- **Discord Rich Presence**
-  - Automatically shows what you're singing on your Discord status.
-
-### Media Support & Playback
-
-- **Versatile Media Support (MTVs & Multiplex)**
-  - Supports MIDI karaoke (`.mid`, `.kar`) with SoundFont (`.sf2`, `.sf3` & `.dls`) playback.
-  - Supports audio tracks (`.mp3`, `.wav`, `.m4a`, `.ogg`) paired with `.lrc` lyrics or CDG.
-  - Supports high-quality MTVs (Music Videos) (`.mp4`, `.mkv`, `.webm`, `.avi`).
-  - Full support for **Multiplex tracks** (pan left/right to toggle the guide vocal).
-- **Native YouTube Integration**
-  - Don't have a song in your local library? Search YouTube directly from the player or your phone and queue it up instantly.
-
-### Recording, Streaming & Creator Tools
-
-- **Instant Recording**
-  - Record your best vocal performances directly to your hard drive with the press of a button.
-- **Live Streaming with RTMP**
-  - Live stream your karaoke sessions to your fans directly inside of Encore!
-- **Built-in OBS Overlays**
-  - Comes with a setlist overlay, so you don't have to alt-tab to update your queue!
-  - Comes with a lyric overlay, so your viewers can sing along with you!
-- **OBS Scene Automation**
-  - Switch to different OBS scenes automatically as you go through your karaoke.
-
----
-
-# Getting Started
-
-## Library Setup
-
-> [!WARNING]
-> Due to copyright restrictions, Encore does not come with a Song Library by default. Learn more on how you can make your own libraries below, or contact us at [sky@encorekaraoke.org](mailto:sky@encorekaraoke.org).
-
-Encore automatically scans your local drives for a folder named **`EncoreLibrary`**, or you can use the Library Manager to import your library.
-
-<div align="center">
-  <img alt="Encore Library Manager" src="readme/library-manager.jpg" style="border-radius: 15px; margin-bottom: 20px; margin-top: 20px;" />
-</div>
-
-To build your library, structure your files like this:
-
-```text
-D:/EncoreLibrary/                                             # Should work for any folder
- ├── manifest.json                                            # Metadata and BGV (Background Video) configs
- ├── [Your Artist] - [Song].mp3                               # Audio file (Compatible with ID3 tags)
- ├── [Your Artist] - [Song].lrc/.mid                          # Matching LRC lyrics file (or MIDI guide)
- ├── [Your Artist] - [Song].cdg                               # or matching CDG file
- ├── [Your Artist] - [Song].mp4                               # Video files for MTV
- ├── [Your Artist] - [Song].mid/.kar                          # MIDI files
- └── [Your Artist] - [Song].chorus.ogg                        # Backing vocals for MIDI files (OGG is recommended)
+```sh
+npm ci
+npm run build
+mkdir -p library
+# Place Artist - Song.mp3 and Artist - Song.lrc inside library/.
+# Provision a random credential of at least 24 characters. Keep it private.
+export ADMIN_KEY_FILE=/absolute/path/to/admin-key
+export PUBLIC_BASE_URL=http://localhost:3000
+npm start
 ```
 
-_Note: For Multiplex tracks (where vocals are on one channel and instrumentals on the other), add `.multiplexed.` to the filename before the extension (e.g., `Song.multiplexed.mp3`)._
+Open [localhost:3000](http://localhost:3000), sign in, create a room, select **Start karaoke on this display**, queue a song, and press **Play / resume**. A host can refresh a guest invitation to show its QR and manual code, or issue a single-use display pairing invitation. A new display must also select **Start karaoke** to unlock browser audio. Keep the display tab visible. Use separate browser profiles/devices for hosts, displays, and guests: cookies identify a device session, not a tab.
 
----
+For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_BASE_URL`; a LAN IP served over HTTP is rejected. Follow the [operator guide](docs/server-hosted-operations.md) for Docker, local DNS/TLS, backups, and lost-display recovery.
 
-## Controls & Shortcuts
+## Configuration
 
-Encore can be fully controlled via a standard keyboard or through EnMoku.
+| Variable                        | Default / purpose                                                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `PUBLIC_BASE_URL`               | `http://localhost:3000`; exact origin used for invitations, Origin checks, and Socket.IO |
+| `ADMIN_KEY_FILE` or `ADMIN_KEY` | Required, at least 24 characters; provision outside the library and backups              |
+| `HOST_KEY_FILE` or `HOST_KEY`   | Optional separate host credential, at least 24 characters                                |
+| `DATA_DIR`                      | `./data`; SQLite, server settings, room state, sessions, audit records                   |
+| `LIBRARY_DIR`                   | `./library`; mount read-only; filenames supply artist/title; same-stem `.lrc` companions |
+| `WEB_DIR`                       | `./dist/web`; compiled browser assets                                                    |
+| `PORT` / `LISTEN_HOST`          | `3000` / `0.0.0.0`; bind loopback when testing without a proxy                           |
+| `TRUSTED_PROXIES`               | Empty by default; comma-separated trusted reverse-proxy IPs or CIDRs; Compose trusts only its Caddy address |
 
-| Key             | Action                                                     |
-| :-------------- | :--------------------------------------------------------- |
-| `0-9`           | Type song code to reserve/play                             |
-| `Enter`         | Confirm reservation / Play highlighted song                |
-| `Escape`        | Stop playback / Clear input / Go back                      |
-| `Space`         | Pause playback                                             |
-| `L`             | Open Lyric Customization menu                              |
-| `Y`             | Open Search Menu (Local + YouTube)                         |
-| `Q`             | Open Reservation List                                      |
-| `M`             | Open Mixer (Adjust Mic & Music levels)                     |
-| `R`             | Toggle recording (during playback) / View recordings       |
-| `S`             | Open Encore Sessions menu                                  |
-| `B`             | Open Broadcast menu                                        |
-| `T`             | Chat (In a session)                                        |
-| `C`             | Toggle Chorus on/off                                       |
-| `- / =`         | Adjust volume                                              |
-| `Shift + - / =` | Adjust mic monitoring volume                               |
-| `Up / Down`     | Tranpose up/down (Playback) / Scroll song list (Main menu) |
-| `Left / Right`  | Multiplex pan (Toggle guide vocal on/off)                  |
-| `' / "`         | Change drum presets                                        |
-| `[ / ]`         | Cycle background videos (BGVs) / Video sync offset         |
-| `F2`            | Enter Setup Mode (in main menu)                            |
+The web server exposes no filesystem browser, arbitrary file API, native IPC bridge, or legacy relay. It serves only the built hosted frontend and registered authorized media. Required fonts, scripts, icons, and QR generation are local. The old renderer modules remain as reference material for later playback parity; they are excluded from the hosted build and runtime.
 
----
+## Development and checks
 
-## Configuration & Setup Mode
+```sh
+npm run build
+npm test
+# Rebuild browser edits with npm run build; watch server edits:
+npm run dev
+```
 
-Pressing **`F2`** in the Main Menu will put you into **Setup Mode**. Setup Mode is a PIN-protected (default: `0000`) menu that allows you to:
+Tests cover room authority, three concurrent Socket.IO controllers, reservation/rate limits, retry deduplication, playback fencing, origin/CSRF checks, byte ranges, symlink rejection, backup integrity, restore invalidation, and physical retirement. Automated tests do not establish physical audio deadlines, phone compatibility, LAN-only operation, or low-end performance. See the status document for those manual gates.
 
-- Change your target Library path.
-- Select the specific Microphone (Input) and Speaker (Output) hardware.
-- Change the SoundFont and MIDI device outputs
-- Adjust Master Volume and Mic Latency overrides.
-- Calibrate Video Sync offsets.
-- Change the Security PIN (Recommended).
+## Project layout
 
----
+- `server/`: standalone HTTP/Socket.IO service, auth, SQLite persistence, rooms, media, operations.
+- `shared/`: protocol version, command allowlist, validation, and defaults.
+- `src/platform/`: explicit browser service adapter.
+- `src/hosted/`: display, controller, browser audio output gate, and shared LRC parser.
+- `deploy/`: non-root container and Caddy/Compose LAN HTTPS example.
+- `tests/server/`: state, recovery, transport, and browser-player tests.
 
-## Development & Running Locally
-
-### Installing
-
-> [!NOTE]
-> Currently, versions **1.0.0 to 1.3.1** are supported on Windows. Versions **1.4.0** and above support Linux and versions **1.10** and above support MacOS.
-
-Ready-to-use installers are available on the [Releases](https://github.com/Encore-Karaoke-Labs/Encore-Karaoke/releases) page.
-
-### Building
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/Encore-Karaoke-Labs/Encore-Karaoke.git
-   cd Encore-Karaoke
-   ```
-
-2. **Install dependencies:**
-
-   ```bash
-   npm i
-   ```
-
-3. **Run the app:**
-
-   ```bash
-   npm run start
-   ```
-
-4. **Build the app on your platform:**
-
-   ```bash
-   npm run make
-   ```
-
-_To run in full-screen Kiosk mode (which disables Windows Explorer that may improve performance), pass the `--kiosk` flag._
-
-### Contributing
-
-**Please refer to our [Contributing](CONTRIBUTING.md) document for more information about contributing.**
-
-For the best experience contributing towards Encore, we recommend using [Visual Studio Code](https://code.visualstudio.com) with the Prettier extension.
-
----
-
-# Credits & Acknowledgments
-
-## Awesome libraries that make Encore possible
-
-- **Underlying framework**: [Cherry Tree / Terebi](https://github.com/terebiorg/terebi)
-- **Audio Playback**:
-  - ID3 metadata support is powered by [jsmediatags](https://github.com/aadsm/jsmediatags).
-  - MIDI playback is powered by [SpessaSynth](https://github.com/spessasus/SpessaSynth).
-  - Pitch detection is handled by [Pitchy](https://github.com/ianprime0509/pitchy).
-  - Key detection by [Meyda](https://meyda.js.org/).
-- **Romanization**:
-  - Japanese transliteration powered by [Kuroshiro](https://kuroshiro.org/).
-  - Korean transliteration powered by [Aromanize](https://github.com/fujaru/aromanize-js/).
-- **Discord RPC**: [discord-rpc](https://github.com/xhayper/discord-rpc).
-
-## Cool people that made Encore great!
-
-- **[Stariix](https://www.youtube.com/@Stariixy)**:
-  - 3D BGV development
-  - Voice provider for Encore's score sounds
-  - Creator and designer behind Encore's mascots, Akiyama Hoshi & Kurayami Kai
-- **[MTSyntho](https://github.com/MTSyntho)**
-  - Provided resources for Linux support
-- **[prjoni99](https://github.com/prjoni99)**:
-  - Provided resouces for Mac support
-  - Indicated the app's first potential security flaws
-- **[Spessasus](https://github.com/spessasus/)**:
-  - Creator of SpessaSynth, the synthesizer that powers Encore
-  - Has provided code suggestions & deeper insights to SpessaSynth
-- **[Objecty](https://www.youtube.com/@objecty)**:
-  - Designer behind Encore's format indicators
-- **[Lap](https://github.com/ItsLap)** & **[Kat21](https://github.com/datkat21)**
-  - Creators of the Cherry Tree core, the underlying framework running Encore
+Encore includes no song library. Use media you have permission to use. No ads, tracking, or external analytics are included. Original credits and asset licensing are retained in the source assets and repository history. Licensed under [MIT](LICENSE.txt).
