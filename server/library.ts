@@ -7,7 +7,15 @@ import { constants } from "node:fs";
 import { digest } from "./store.js";
 import { requireValue } from "../shared/contracts.js";
 
-const TYPES: Record<string, string> = { ".mp3": "audio/mpeg", ".lrc": "text/plain; charset=utf-8" };
+const TYPES: Record<string, string> = {
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
+  ".m4a": "audio/mp4", ".aac": "audio/aac", ".opus": "audio/ogg",
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska", ".mov": "video/quicktime",
+  ".mid": "audio/midi", ".midi": "audio/midi", ".kar": "audio/midi",
+  ".cdg": "application/octet-stream", ".lrc": "text/plain; charset=utf-8",
+};
+const MIDI = new Set([".mid", ".midi", ".kar"]);
+const VIDEO = new Set([".mp4", ".webm", ".mkv", ".mov"]);
 export const inside = (root: string, file: string) =>
   file !== root &&
   !path.relative(root, file).startsWith(`..${path.sep}`) &&
@@ -32,6 +40,7 @@ export class Library {
       const walk = async (directory: string, depth = 0) => {
         requireValue(depth <= 24 && songs.length < 100_000, "library_limit");
         const entries = await fs.readdir(directory, { withFileTypes: true });
+        const siblings = new Map(entries.filter((e) => e.isFile() && !e.isSymbolicLink()).map((e) => [e.name.toLowerCase(), e.name]));
         for (const entry of entries) {
           if (entry.isSymbolicLink()) continue;
           const filename = path.join(directory, entry.name);
@@ -39,11 +48,18 @@ export class Library {
             await walk(filename, depth + 1);
             continue;
           }
+          const extension = path.extname(entry.name).toLowerCase();
           if (
             !entry.isFile() ||
-            path.extname(entry.name).toLowerCase() !== ".mp3"
+            !TYPES[extension] || [".lrc", ".cdg"].includes(extension)
           )
             continue;
+          if (entry.name.toLowerCase().endsWith(".vocals.wav")) {
+            const reference = await this.indexAsset(root, filename);
+            requireValue(reference.size <= 32 * 1024 * 1024, "reference_too_large");
+            assets.push(reference);
+            continue;
+          }
           const relative = path.relative(root, filename);
           const id = digest(`song:${relative}`);
           const asset = await this.indexAsset(root, filename);
@@ -55,12 +71,12 @@ export class Library {
             title: separator >= 0 ? stem.slice(separator + 3) : stem,
             artist: separator >= 0 ? stem.slice(0, separator) : "",
             assetId: asset.id,
-            format: "mp3",
+            format: MIDI.has(extension) ? "midi" : VIDEO.has(extension) ? "video" : extension === ".mp3" ? "mp3" : "audio",
           };
           try {
             const lyrics = await this.indexAsset(
               root,
-              path.join(directory, `${stem}.lrc`),
+              path.join(directory, siblings.get(`${stem}.lrc`.toLowerCase()) || `${stem}.lrc`),
             );
             requireValue(lyrics.size <= 2 * 1024 * 1024, "lyrics_too_large");
             assets.push(lyrics);
@@ -68,12 +84,21 @@ export class Library {
           } catch (error) {
             if (serviceError(error).code !== "ENOENT") throw error;
           }
+          for (const [suffix, key, limit] of [[".cdg", "cdgId", 32 * 1024 * 1024], [".mid", "guideId", 4 * 1024 * 1024], [".vocals.wav", "referenceId", 32 * 1024 * 1024]] as const) {
+            const companion = siblings.get(`${stem}${suffix}`.toLowerCase());
+            if (!companion || MIDI.has(extension)) continue;
+            const sidecar = await this.indexAsset(root, path.join(directory, companion));
+            requireValue(sidecar.size <= limit, "companion_too_large");
+            assets.push(sidecar);
+            song[key] = sidecar.id;
+          }
+          if (song.format === "midi") requireValue(asset.size <= 4 * 1024 * 1024, "midi_too_large");
           songs.push(song);
         }
       };
       await walk(root);
       this.store.transaction(() => {
-        this.store.db.exec("DELETE FROM songs; DELETE FROM assets;");
+        this.store.db.exec("DELETE FROM songs WHERE json_extract(value,'$.format') IS NOT 'youtube'; DELETE FROM assets;");
         for (const a of assets) this.store.put("assets", a.id, a);
         for (const s of songs) this.store.put("songs", s.id, s);
         this.store.put("meta", "library", {
@@ -89,6 +114,12 @@ export class Library {
     } finally {
       this.scanning = false;
     }
+  }
+  vocalReference(videoId: string) {
+    return this.store.all("assets").find(asset => {
+      const name = path.basename(asset.relative);
+      return name.slice(0, -11) === videoId && name.slice(-11).toLowerCase() === ".vocals.wav";
+    })?.id;
   }
   async indexAsset(root: string, filename: string): Promise<Asset> {
     const canonical = await fs.realpath(filename);
@@ -134,7 +165,7 @@ export class Library {
   search(query: string, offset = 0) {
     const pattern = `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
     const where =
-      "WHERE (json_extract(value,'$.title') || ' ' || json_extract(value,'$.artist')) LIKE ? ESCAPE '\\'";
+      "WHERE json_extract(value,'$.format') IS NOT 'youtube' AND (json_extract(value,'$.title') || ' ' || json_extract(value,'$.artist')) LIKE ? ESCAPE '\\'";
     const items = this.store.db
       .prepare(
         `SELECT value FROM songs ${where} ORDER BY json_extract(value,'$.title'),id LIMIT 50 OFFSET ?`,

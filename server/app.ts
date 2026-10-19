@@ -14,10 +14,14 @@ declare module "express-serve-static-core" {
 }
 
 import express from "express";
+import { Readable } from "node:stream";
+import type { ReadableStream } from "node:stream/web";
+import { Invidious } from "./invidious.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
 import { Auth } from "./auth.js";
+import { secret } from "./store.js";
 import { Rooms } from "./rooms.js";
 import { Library } from "./library.js";
 import { Fault, requireValue, text, number } from "../shared/contracts.js";
@@ -32,6 +36,7 @@ export function createApplication(store: Store, config: Configuration) {
     requireValue(req.session, "unauthorized", 401);
     return req.session;
   };
+  const invidious = new Invidious(config.invidiousUrl);
   let transfers = 0;
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustedProxies?.length ? config.trustedProxies : false);
@@ -40,8 +45,8 @@ export function createApplication(store: Store, config: Configuration) {
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
     });
     if (config.secure) res.set("Strict-Transport-Security", "max-age=31536000");
     next();
@@ -62,16 +67,34 @@ export function createApplication(store: Store, config: Configuration) {
     }
     next();
   });
-  app.post("/api/login", (req, res) => {
-    auth.throttle(`login:${req.ip}`);
-    const role = auth.login(req.body.key);
-    const result = auth.create(
-      role,
-      req.body.nickname || (role === "admin" ? "Administrator" : "Host"),
-    );
-    res
-      .set("Set-Cookie", result.cookie)
-      .json({ id: result.session.id, role, csrf: result.session.csrf });
+  // Every public TV receives an independent owner; no shared host credential.
+  app.post("/api/launch", (req, res) => {
+    auth.throttle(`launch:${req.ip}`, 10);
+    auth.throttle("launch:global", 100);
+    const previous = req.session;
+    if (previous && rooms.host(previous)) {
+      const existing = store.all("rooms").find((room) => room.status !== "ended" && room.ownerPrincipal === previous.principal);
+      if (existing) {
+        res.json({ id: previous.id, role: previous.role, csrf: previous.csrf, roomId: existing.id });
+        return;
+      }
+    }
+    const created = auth.create("host", "Karaoke TV", `anonymous:${secret()}`);
+    try {
+      const room = rooms.create(created.session, "Encore Karaoke");
+      room.policy.guestControl = true;
+      room.expires = Date.now() + 24 * 60 * 60_000;
+      store.put("rooms", room.id, room);
+      created.session.roomId = room.id;
+      store.put("sessions", created.session.tokenHash, created.session);
+      res.status(201).set("Set-Cookie", created.cookie).json({ id: created.session.id, role: "host", csrf: created.session.csrf, roomId: room.id });
+    } catch (error) {
+      store.delete("sessions", created.session.tokenHash);
+      throw error;
+    }
+  });
+  app.post("/api/login", (_req, res) => {
+    res.status(410).json({ error: "key_login_removed" });
   });
   app.post("/api/join", (req, res) => {
     auth.throttle(`join:${req.ip}`, 30);
@@ -148,10 +171,15 @@ export function createApplication(store: Store, config: Configuration) {
       rooms.snapshot(rooms.room(req.params.roomId, authenticated(req)), authenticated(req)),
     ),
   );
+  app.post("/api/rooms/:roomId/pairing", async (req, res) => {
+    const grant = rooms.pairing(req.params.roomId, authenticated(req));
+    const url = `${config.origin}/control#invite=${grant.invitation}`;
+    res.json({ ...grant, url, qr: await QRCode.toDataURL(url, { margin: 2, width: 256 }) });
+  });
   app.post("/api/rooms/:roomId/invitations", async (req, res) => {
     const grant = rooms.invite(req.params.roomId, authenticated(req), req.body.kind);
     // Fragment secrets never enter the access log or the Referer header.
-    const url = `${config.origin}/#invite=${grant.invitation}`;
+    const url = `${config.origin}/${req.body.kind === "display" ? "tv" : "control"}#invite=${grant.invitation}`;
     res.json({
       ...grant,
       url,
@@ -195,11 +223,53 @@ export function createApplication(store: Store, config: Configuration) {
     const offset = number(Number(req.query.offset || 0), 0, 100_000);
     res.json(library.search(q, Math.floor(offset)));
   });
+  app.get("/api/youtube/search", async (req, res) => {
+    rooms.room(String(req.query.roomId || ""), authenticated(req));
+    auth.throttle(`youtube:${authenticated(req).id}`, 10);
+    auth.throttle("youtube:global", 100);
+    res.json({ items: await invidious.search(text(req.query.q, 200)) });
+  });
+  app.get("/media/youtube/:id", async (req, res) => {
+    const session = authenticated(req);
+    rooms.room(String(req.query.roomId || ""), session);
+    requireValue(/^[\w-]{11}$/.test(req.params.id), "invalid_youtube_id");
+    requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
+    transfers++;
+    const controller = new AbortController();
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      transfers--;
+      controller.abort();
+    };
+    res.once("close", finish);
+    try {
+      const upstream = await invidious.stream(req.params.id, req.headers.range, controller.signal, req.method === "HEAD");
+      if (finished) { await upstream.body?.cancel(); return; }
+      res.status(upstream.status);
+      for (const name of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+        const value = upstream.headers.get(name);
+        if (value) res.set(name, value);
+      }
+      if (!upstream.body || req.method === "HEAD") { await upstream.body?.cancel(); res.end(); return; }
+      const stream = Readable.fromWeb(upstream.body as unknown as ReadableStream);
+      res.once("close", () => stream.destroy());
+      stream.on("error", () => res.destroy());
+      stream.pipe(res);
+    } catch (error) {
+      finish();
+      throw error;
+    }
+  });
+
   app.get("/api/library/songs/:id", (req, res) => {
     rooms.room(String(req.query.roomId || ""), authenticated(req));
     const song = store.get("songs", req.params.id);
     requireValue(song, "song_not_found", 404);
-    res.json(song);
+    const referenceId = song.format === "youtube" && song.videoId ? library.vocalReference(song.videoId) : song.referenceId;
+    const reference = referenceId ? store.get("assets", referenceId) : undefined;
+    res.json({ ...song, referenceId, referenceVersion: reference ? `${reference.size}:${reference.mtime}` : undefined });
   });
   // A narrowly scoped bearer token can retire an old generation after authentication-epoch rotation.
   // It can never acquire a session, renew a lease, or control the room.
@@ -297,6 +367,7 @@ export function createApplication(store: Store, config: Configuration) {
       throw error;
     }
   });
+  app.get(["/tv", "/control"], (_req, res) => res.sendFile("app.html", { root: config.web }));
   app.use(
     express.static(config.web, {
       index: "index.html",
@@ -409,14 +480,54 @@ export function createApplication(store: Store, config: Configuration) {
       publish(socket.data.roomId);
       return { accepted: true };
     });
-    // Remote microphones are intentionally disabled until the hardware feasibility gate passes.
-    handle("mic:signal", () => {
-      throw new Fault("microphone_beta_unavailable", 403);
+    handle<{ target: string; description?: { type: string; sdp: string }; candidate?: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } }>("mic:signal", (message, session) => {
+      requireValue(message && socket.data.roomId, "room_required");
+      const room = rooms.room(socket.data.roomId, session);
+      requireValue(rooms.available(room) && room.lease && !room.lease.releaseRequested, "display_unavailable", 409);
+      const target = text(message.target, 100);
+      const display = room.lease.deviceId;
+      requireValue(session.id !== target &&
+        ((session.id === display && room.members[target]?.role === "guest") ||
+         (target === display && session.role === "guest")), "forbidden", 403);
+      requireValue(!!message.description !== !!message.candidate);
+      let payload;
+      if (message.description) {
+        const description = message.description;
+        requireValue(description.type === (session.id === display ? "answer" : "offer"));
+        requireValue(typeof description.sdp === "string" && description.sdp.length > 0 && description.sdp.length <= 12000);
+        payload = { description: { type: description.type, sdp: description.sdp } };
+      } else {
+        const candidate = message.candidate!;
+        requireValue(typeof candidate.candidate === "string" && candidate.candidate.length <= 2048);
+        requireValue(candidate.sdpMid == null || (typeof candidate.sdpMid === "string" && candidate.sdpMid.length <= 256));
+        requireValue(candidate.sdpMLineIndex == null || (Number.isInteger(candidate.sdpMLineIndex) && candidate.sdpMLineIndex >= 0 && candidate.sdpMLineIndex < 100));
+        payload = { candidate: { candidate: candidate.candidate, sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex } };
+      }
+      const recipient = [...io.sockets.sockets.values()].find((peer) => peer.data.sessionId === target && peer.data.roomId === room.id);
+      requireValue(recipient, "microphone_peer_unavailable", 409);
+      socketSession(recipient);
+      recipient.emit("mic:signal", { from: session.id, ...payload });
+      return { accepted: true };
     });
+    const closeMicrophone = () => {
+      for (const peer of io.sockets.sockets.values())
+        if (peer.id !== socket.id && peer.data.roomId === socket.data.roomId)
+          peer.emit("mic:closed", { from: socket.data.sessionId });
+    };
+    handle("mic:close", () => { closeMicrophone(); return { accepted: true }; });
+    socket.on("disconnect", closeMicrophone);
   });
   let sweepCount = 0;
   const sweep = setInterval(() => {
     for (const room of store.all("rooms")) {
+      if (room.expires && room.expires < Date.now() && room.status !== "ended") {
+        room.status = "ended";
+        room.desired = "paused";
+        if (room.lease) room.lease.releaseRequested = true;
+        room.revision++;
+        store.put("rooms", room.id, room);
+        publish(room.id);
+      }
       if (
         room.lease &&
         !room.lease.retired &&

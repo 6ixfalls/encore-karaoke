@@ -540,3 +540,17 @@ test("lease suspension never resumes a retired generation when the audio clock w
     /stale_display/,
   );
 });
+
+test("YouTube streams use the native media element and the existing fenced audio graph", async t => {
+  const { player, service, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  service.request = async () => ({ format: "youtube", videoId: "M7lc1UVf-VE" });
+  await player.update({ ...room, desired: "playing", current: { playbackId: "video", songId: "yt:M7lc1UVf-VE" } });
+  assert.equal(player.audio, player.localMedia);
+  assert.equal(player.audio.hidden, false);
+  assert.equal(player.audio.src, `/media/youtube/M7lc1UVf-VE?roomId=${room.id}`);
+  player.disconnected();
+  assert.equal(player.audio.paused, true);
+  assert.equal(player.gate.gain.events.at(-1).value, 0);
+});

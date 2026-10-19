@@ -1,16 +1,37 @@
 import { parseLrc } from "./lrc.js";
+import { parseMidi, renderMidi } from "./midi.js";
+import { Cdg } from "./cdg.js";
 
 export class BrowserPlayer {
-  constructor(services, { telemetry, lyrics, error, released }) {
+  constructor(services, { telemetry, lyrics, error, released, media, cdg, performance: performanceTools }) {
     Object.assign(this, { services, telemetry, lyrics, error, released });
+    try {
+      this.pendingRelease = JSON.parse(sessionStorage.getItem("encore-display-release") || "null");
+    } catch { this.pendingRelease = null; }
     this.generation = null;
     this.revalidated = false;
     this.retired = new Set();
     this.started = false;
     this.loaded = null;
-    this.audio = new Audio();
+    this.audio = media || new Audio();
+    this.localMedia = this.audio;
+    this.cdgCanvas = cdg;
+    this.performanceTools = performanceTools;
     this.audio.preload = "auto";
     this.loadingVersion = 0;
+    this.bindMedia(this.audio);
+    this.lyricsTimer = setInterval(() => this.renderLyrics(), 50);
+    this.timer = setInterval(() => {
+      if (this.generation && this.valid() && this.loaded && !this.loading)
+        this.report(this.audio.paused ? "paused" : this.mediaState);
+    }, 1000);
+    window.addEventListener("pagehide", () => this.stop().catch(() => {}));
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && this.generation)
+        this.stop().catch((error) => this.error(error));
+    });
+  }
+  bindMedia(media) {
     for (const [event, state] of Object.entries({
       playing: "playing",
       pause: "paused",
@@ -18,7 +39,9 @@ export class BrowserPlayer {
       ended: "ended",
       error: "failed",
     })) {
-      this.audio.addEventListener(event, () => {
+      media.addEventListener(event, () => {
+        if (this.audio !== media) return;
+        if (event === "playing" && (!this.valid() || this.room?.desired !== "playing")) { media.pause(); return; }
         if (this.generation && this.loaded && this.valid()) {
           if (state === "failed") {
             this.failPlayback(new Error("media_unavailable"), this.loaded);
@@ -30,16 +53,20 @@ export class BrowserPlayer {
         }
       });
     }
-    this.lyricsTimer = setInterval(() => this.renderLyrics(), 50);
-    this.timer = setInterval(() => {
-      if (this.generation && this.valid() && this.loaded && !this.loading)
-        this.report(this.audio.paused ? "paused" : this.mediaState);
-    }, 1000);
-    window.addEventListener("pagehide", () => this.stop().catch(() => {}));
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.generation)
-        this.stop().catch((error) => this.error(error));
-    });
+  }
+  clearMedia() {
+    this.audio.pause();
+    this.audio.removeAttribute("src");
+    this.audio.load();
+    this.audio = this.localMedia;
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+    this.objectUrl = null;
+    this.cdg = null;
+    this.song = null;
+    this.guideNotes = [];
+    if (this.localMedia.hidden !== undefined) this.localMedia.hidden = true;
+    if (this.cdgCanvas) this.cdgCanvas.hidden = true;
+    this.performanceTools?.trackChanged();
   }
   async initialize() {
     if (this.context?.state === "running") return;
@@ -89,6 +116,7 @@ export class BrowserPlayer {
     this.gate.gain.cancelScheduledValues(now);
     this.gate.gain.setValueAtTime(this.room?.volume ?? 0.65, now);
     this.gate.gain.setValueAtTime(0, now + budget / 1000);
+    // Retire media and microphone capture when the display lease expires.
     clearTimeout(this.expiryTimer);
     this.expiryTimer = setTimeout(
       () => this.stop().catch((error) => this.error(error)),
@@ -97,6 +125,7 @@ export class BrowserPlayer {
   }
   async claim(roomId) {
     await this.initialize();
+    await this.releasePending();
     this.roomId = roomId;
     const start = performance.now();
     const grant = await this.services.request(
@@ -157,6 +186,7 @@ export class BrowserPlayer {
         ? this.audio.currentTime
         : 0,
       rate: this.audio.playbackRate,
+      ...(state === "ended" && this.performanceTools?.result() ? { score: this.performanceTools.result() } : {}),
     });
   }
   async update(room) {
@@ -188,9 +218,7 @@ export class BrowserPlayer {
       this.loadingVersion++;
       this.loaded = null;
       this.loading = false;
-      this.audio.pause();
-      this.audio.removeAttribute("src");
-      this.audio.load();
+      this.clearMedia();
       this.lines = [];
       this.lyrics("", "");
       return;
@@ -204,9 +232,7 @@ export class BrowserPlayer {
       this.mediaState = "loading";
       this.loaded = playbackId;
       this.lines = [];
-      this.audio.pause();
-      this.audio.removeAttribute("src");
-      this.audio.load();
+      this.clearMedia();
       try {
         const song = await this.services.request(
           `/api/library/songs/${room.current.songId}?roomId=${room.id}`,
@@ -217,7 +243,40 @@ export class BrowserPlayer {
           this.loaded !== playbackId
         )
           return;
-        this.audio.src = this.services.media(song.assetId, room.id);
+        const getBuffer = async (id, limit) => {
+          const response = await fetch(this.services.media(id, room.id));
+          if (!response.ok || Number(response.headers?.get("content-length")) > limit) throw new Error("companion_unavailable");
+          const buffer = await response.arrayBuffer();
+          if (buffer.byteLength > limit) throw new Error("companion_too_large");
+          return buffer;
+        };
+        if (song.format === "youtube") {
+          this.audio.src = `/media/youtube/${encodeURIComponent(song.videoId)}?roomId=${encodeURIComponent(room.id)}`;
+          this.audio.hidden = false;
+        } else if (song.format === "midi") {
+          const midi = parseMidi(await getBuffer(song.assetId, 4 * 1024 * 1024));
+          const blob = await renderMidi(midi);
+          if (version !== this.loadingVersion || !this.valid()) return;
+          this.objectUrl = URL.createObjectURL(blob);
+          this.audio.src = this.objectUrl;
+          this.lines = midi.lyrics;
+          this.guideNotes = midi.notes.filter((n) => n.channel !== 9);
+        } else {
+          this.audio.src = this.services.media(song.assetId, room.id);
+          this.audio.hidden = song.format !== "video";
+        }
+        this.song = song;
+        if (song.guideId) {
+          const guide = parseMidi(await getBuffer(song.guideId, 4 * 1024 * 1024));
+          if (version !== this.loadingVersion || !this.valid()) return;
+          this.guideNotes = guide.notes.filter((n) => n.channel !== 9);
+        }
+        if (song.cdgId && this.cdgCanvas) {
+          const buffer = await getBuffer(song.cdgId, 32 * 1024 * 1024);
+          if (version !== this.loadingVersion || !this.valid()) return;
+          this.cdg = new Cdg(buffer, this.cdgCanvas);
+          this.cdgCanvas.hidden = false;
+        }
         if (song.lyricsId) {
           const response = await fetch(
             this.services.media(song.lyricsId, room.id),
@@ -227,6 +286,9 @@ export class BrowserPlayer {
           if (version !== this.loadingVersion || !this.valid()) return;
           this.lines = lines;
         }
+        if (version !== this.loadingVersion || !this.valid()) return;
+        await this.performanceTools?.prepareReference?.(this, song, getBuffer,
+          () => version === this.loadingVersion && this.valid() && this.loaded === playbackId);
         if (version !== this.loadingVersion || !this.valid()) return;
         this.loading = false;
         this.mediaState = "ready";
@@ -245,6 +307,7 @@ export class BrowserPlayer {
     )
       return;
     const current = this.room.current;
+    this.audio.playbackRate = this.room.tempo;
     if (current.seek && this.seekId !== current.seek.id) {
       this.audio.currentTime = current.seek.position;
       this.seekId = current.seek.id;
@@ -273,15 +336,15 @@ export class BrowserPlayer {
     this.loaded = null;
     this.failedPlaybackId = playbackId;
     this.loading = false;
-    this.audio.pause();
-    this.audio.removeAttribute("src");
-    this.audio.load();
+    this.clearMedia();
     this.lines = [];
     this.error(error);
     this.report("failed", playbackId);
   }
   renderLyrics() {
     const position = this.audio.currentTime;
+    this.cdg?.render(position);
+    this.performanceTools?.update(this);
     const index = (this.lines || []).findLastIndex(
       (line) => line.time <= position,
     );
@@ -297,10 +360,10 @@ export class BrowserPlayer {
       this.loadingVersion++;
       this.loading = false;
       this.loaded = null;
-      this.audio.removeAttribute("src");
-      this.audio.load();
+      this.clearMedia();
     }
     this.audio.pause();
+    this.performanceTools?.stopMicrophone();
     // The armed audio-thread cutoff remains in force during a bounded reconnect grace period.
     // A reconnect never opens output by itself; a successful lease renewal must rearm it.
     if (this.gate) this.gate.gain.setValueAtTime(0, this.context.currentTime);
@@ -322,30 +385,23 @@ export class BrowserPlayer {
       this.gate.gain.cancelScheduledValues(this.context.currentTime);
       this.gate.gain.setValueAtTime(0, this.context.currentTime);
     }
-    this.audio.pause();
-    this.audio.removeAttribute("src");
-    this.audio.load();
+    this.clearMedia();
+    this.performanceTools?.stopMicrophone();
     this.lines = [];
     this.lyrics("", "");
     if (!generation) {
       if (this.pendingRelease) await this.releasePending();
       return;
     }
+    const drainMs = Math.max(300, ((this.context.outputLatency || 0) + (this.context.baseLatency || 0)) * 1000 + 200);
+    // Page unload may cancel the asynchronous release. The next page can finish
+    // acknowledging this generation only after its synchronously muted output drains.
+    this.pendingRelease = { roomId: this.roomId, generation, releaseToken, readyAfter: Date.now() + drainMs };
+    try { sessionStorage.setItem("encore-display-release", JSON.stringify(this.pendingRelease)); } catch { /* Storage may be disabled. */ }
     this.stopping = (async () => {
       // Drain any hardware buffering before acknowledging a permanently retired generation.
       await this.context.suspend();
-      await new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          Math.max(
-            300,
-            ((this.context.outputLatency || 0) + this.context.baseLatency) *
-              1000 +
-              200,
-          ),
-        ),
-      );
-      this.pendingRelease = { roomId: this.roomId, generation, releaseToken };
+      await new Promise((resolve) => setTimeout(resolve, drainMs));
       await this.releasePending();
     })();
     try {
@@ -357,6 +413,8 @@ export class BrowserPlayer {
   async releasePending() {
     const pending = this.pendingRelease;
     if (!pending) return;
+    const remaining = (pending.readyAfter || 0) - Date.now();
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
     await this.services.request(`/display-release/${pending.roomId}`, {
       method: "POST",
       keepalive: true,
@@ -365,7 +423,10 @@ export class BrowserPlayer {
         releaseToken: pending.releaseToken,
       },
     });
-    if (this.pendingRelease === pending) this.pendingRelease = null;
+    if (this.pendingRelease === pending) {
+      this.pendingRelease = null;
+      try { sessionStorage.removeItem("encore-display-release"); } catch { /* Storage may be disabled. */ }
+    }
     this.released();
   }
 }

@@ -40,6 +40,8 @@ export interface Room {
   id: string;
   name: string;
   ownerPrincipal?: string;
+  expires?: number;
+  pairing?: { code: string; token: string };
   status: "open" | "locked" | "ended";
   revision: number;
   queue: Reservation[];
@@ -50,6 +52,8 @@ export interface Room {
   tempo: number;
   position: number;
   sampleTime?: number;
+  cheers?: { id: string; nickname: string; message: string; time: number }[];
+  scores?: { playbackId: string; title: string; nickname: string; value: number; mode: "guide" | "stability" }[];
   members: Record<string, { nickname: string; role: Role }>;
   policy: { roomCap: number; guestCap: number; guestControl: boolean };
   lease: Lease | null;
@@ -67,8 +71,12 @@ export interface Song {
   id: string;
   title: string;
   artist: string;
-  assetId: string;
-  format: "mp3";
+  assetId?: string;
+  format: "mp3" | "audio" | "video" | "midi" | "youtube";
+  videoId?: string;
+  cdgId?: string;
+  guideId?: string;
+  referenceId?: string;
   lyricsId?: string;
 }
 export interface Asset {
@@ -97,6 +105,7 @@ export interface Telemetry {
   playbackId: string;
   state: PlaybackState;
   position: number;
+  score?: { value: number; samples: number; mode: "guide" | "stability" };
 }
 export interface Retirement {
   generation: string;

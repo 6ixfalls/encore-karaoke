@@ -14,47 +14,35 @@
     <header>
       <a href="/">ENCORE <span>EnMoku!</span></a
       ><span id="connection" role="status">Connecting…</span
-      ><button id="logout" hidden>Sign out</button>
+      ><button id="logout" hidden>Leave room</button>
     </header>
     <main>
       <p id="message" role="alert" aria-live="polite"></p>
       <section id="welcome">
-        <h1>Your room. Your encore.</h1>
+        <h1>Control karaoke</h1>
         <p>
-          Open a room on your display, then let everyone choose the next song.
+          Enter the code on your TV, or scan its QR code to connect automatically.
         </p>
         <div class="columns">
           <form id="join-form" class="card">
-            <h2>Join karaoke</h2>
+            <h2>Control karaoke</h2>
             <label
               >Nickname<input
                 id="nickname"
                 maxlength="40"
                 autocomplete="nickname"
-                required /></label
+                placeholder="Singer" /></label
             ><label
               >Join code<input
                 id="join-code"
+                inputmode="numeric"
+                placeholder="6-digit room code"
                 maxlength="128"
                 autocomplete="off"
                 required /></label
-            ><button>Join room</button>
+            ><button>Connect remote</button>
           </form>
-          <form id="login-form" class="card">
-            <h2>Host sign in</h2>
-            <label
-              >Host or administrator credential<input
-                id="credential"
-                type="password"
-                maxlength="512"
-                autocomplete="current-password"
-                required /></label
-            ><button>Sign in</button>
-            <p class="muted">
-              Your server operator provisions this credential. Opening this page
-              grants no host rights.
-            </p>
-          </form>
+
         </div>
       </section>
       <section id="lobby" hidden>
@@ -71,20 +59,25 @@
         </form>
       </section>
       <section id="room" hidden>
+        <section id="remote-microphone" class="card" hidden><h2>Microphone</h2><button id="remote-mic-start">Enable phone microphone</button><button id="remote-mic-stop" hidden>Turn microphone off</button><p id="remote-mic-status" role="status">Use headphones or keep your phone away from the TV speakers.</p></section>
         <div class="room-heading">
           <div>
             <p class="eyebrow">KARAOKE ROOM</p>
             <h1 id="room-title"></h1>
           </div>
-          <button id="choose-room">Rooms</button>
+          <button id="choose-room">Enter another code</button>
         </div>
         <div class="stage card">
           <p id="playback-status" class="eyebrow"></p>
           <h2 id="now-title">Waiting for your first song</h2>
           <p id="now-artist"></p>
+          <video id="local-media" playsinline hidden></video>
+          <canvas id="cdg-player" hidden></canvas>
+          <div id="cheers" role="status" aria-live="polite"></div>
           <div id="lyrics" aria-live="off"></div>
           <div id="next-lyrics"></div>
           <p id="progress" class="muted"></p>
+          <p id="score" role="status"></p>
           <div id="display-controls" hidden>
             <button id="start-display">Start karaoke on this display</button
             ><button id="stop-display" hidden>Release display</button
@@ -92,6 +85,19 @@
             <p class="muted">
               Start enables browser audio. Keep this tab visible while singing.
             </p>
+            <div class="controls">
+              <button id="enable-mic">Enable microphone &amp; scoring</button>
+              <button id="disable-mic">Disable microphone</button>
+              <button id="record">Record performance</button>
+              <button id="stop-record">Stop recording</button>
+            </div>
+            <label>Microphone delay (ms)
+              <input id="mic-latency" type="number" min="0" max="500" step="10" value="80" />
+            </label>
+            <p id="performance-status" role="status"></p>
+            <p class="muted">Microphone input stays on this display. Nightingale scoring compares your voice with MIDI guides or prepared vocal references. Songs without a reference show pitch stability. Recordings stay in this browser until downloaded. YouTube streams include backing audio and video in recordings.</p>
+            <div id="recordings"></div>
+            <button id="clear-recordings">Clear downloaded recording files from memory</button>
           </div>
           <div id="play-controls" hidden class="controls">
             <button id="play">Play / resume</button
@@ -138,6 +144,14 @@
             <p id="search-count" class="muted"></p>
             <div id="songs"></div>
             <button id="more" hidden>Load more</button>
+            <h3>YouTube</h3>
+            <form id="youtube-form">
+              <label>Video URL, ID, or search<input id="youtube-query" maxlength="200" required placeholder="Paste a YouTube link or search" /></label>
+              <label>Title for pasted video<input id="youtube-title" maxlength="200" placeholder="Song title" /></label>
+              <button>Find / queue video</button>
+            </form>
+            <p class="muted">Links work without a search key. Search requires the operator’s YouTube API key. Playback requires internet and embedding permission.</p>
+            <div id="youtube-results"></div>
           </section>
           <section class="card">
             <h2>Up next</h2>
@@ -145,6 +159,12 @@
               Reservations are shared with everyone in this room.
             </p>
             <ol id="queue"></ol>
+            <form id="cheer-form">
+              <label>Cheer for the singer<input id="cheer-message" maxlength="120" required placeholder="Great performance!" /></label>
+              <button>Send cheer</button>
+            </form>
+            <h3>Recent performances</h3>
+            <div id="scores"></div>
             <h3>In the room</h3>
             <div id="participants"></div>
           </section>
@@ -152,9 +172,7 @@
         <section id="host-tools" class="card" hidden>
           <h2>Room controls</h2>
           <div class="controls">
-            <button id="invite">Refresh guest invitation</button
-            ><button id="pair-display">Pair another display</button
-            ><button id="lock">Lock room</button
+            <button id="invite">Show pairing code</button><button id="lock">Lock room</button
             ><button id="end" class="danger">End room</button>
           </div>
           <div id="invitation" hidden>
@@ -190,38 +208,13 @@
             ><button>Save policy</button>
           </form>
         </section>
-        <section id="admin-tools" class="card" hidden>
-          <h2>Server administration</h2>
-          <button id="scan">Rescan mounted library</button
-          ><button id="scan-status">Indexing status</button>
-          <details>
-            <summary>Physically retire a lost display</summary>
-            <p>
-              Use only after powering off or physically disconnecting the audio
-              output of the old device. Keep it isolated until its old browser
-              is terminated and pairing is cleared. After a restore, isolate
-              every possibly outstanding display, including devices paired after
-              the backup.
-            </p>
-            <p id="retire-generation" class="monospace"></p>
-            <form id="retire-form">
-              <label
-                ><input id="isolated" type="checkbox" required /> The old output
-                is physically isolated</label
-              ><label
-                ><input id="terminated" type="checkbox" required /> The old
-                browser is terminated and its pairing is cleared</label
-              ><label
-                ><input id="all-isolated" type="checkbox" required /> Every
-                possibly outstanding display is isolated</label
-              ><button class="danger">Confirm physical retirement</button>
-            </form>
-          </details>
-        </section>
+
       </section>
       <footer>
-        Self-hosted karaoke · MP3 + LRC · Phone microphones are pending hardware
-        validation
+        Self-hosted karaoke · Nightingale scoring · Copyright © 2026 Encore Karaoke Labs
+        · <a href="/LICENSE.txt">GPL-3.0 license</a>
+        · <a href="/THIRD_PARTY_NOTICES.txt">Credits &amp; no-warranty notice</a>
+        · <a href="/source.tar.gz" download>Source code</a>
       </footer>
     </main>
   </body>

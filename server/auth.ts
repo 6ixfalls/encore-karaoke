@@ -2,7 +2,7 @@ import type { Store } from "./store.js";
 import type { Configuration } from "./config.js";
 import type { Session, Role } from "./types.js";
 import type { Request } from "express";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { secret, digest } from "./store.js";
 import { requireValue, text, Fault } from "../shared/contracts.js";
 
@@ -33,13 +33,7 @@ export class Auth {
       nickname: text(nickname, 40),
       csrf: secret(),
       epoch: this.store.authEpoch,
-      principal:
-        principal ||
-        (["admin", "host"].includes(role)
-          ? digest(
-              `${role}:${role === "admin" ? this.config.adminKey : this.config.hostKey || this.config.adminKey}`,
-            )
-          : undefined),
+      principal: principal || (["admin", "host"].includes(role) ? secret() : undefined),
       expires: Date.now() + 7 * 86_400_000,
       tokenHash: digest(token),
       revoked: false,
@@ -49,19 +43,6 @@ export class Auth {
       session,
       cookie: `encore_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${this.config.secure ? "; Secure" : ""}`,
     };
-  }
-  login(key: unknown): "admin" | "host" {
-    requireValue(
-      typeof key === "string" && key.length <= 512,
-      "invalid_credentials",
-      401,
-    );
-    const equal = (expected: string | undefined) =>
-      expected &&
-      timingSafeEqual(Buffer.from(digest(key)), Buffer.from(digest(expected)));
-    if (equal(this.config.adminKey)) return "admin";
-    if (equal(this.config.hostKey)) return "host";
-    throw new Fault("invalid_credentials", 401);
   }
   origin(origin: unknown) {
     requireValue(origin === this.config.origin, "invalid_origin", 403);

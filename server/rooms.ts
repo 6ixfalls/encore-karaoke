@@ -98,6 +98,8 @@ export class Rooms {
       tempo: room.tempo,
       position: room.position,
       sampleTime: room.sampleTime,
+      cheers: (room.cheers || []).filter((c) => this.clock() - c.time < 8000),
+      scores: room.scores || [],
       policy: room.policy,
       recoveryRequired: !!room.recoveryRequired,
       participants: Object.entries(room.members).map(([id, m]) => ({
@@ -113,6 +115,26 @@ export class Rooms {
       },
       canControl: this.host(session) || room.policy.guestControl,
     };
+  }
+  pairing(roomId: string, session: Session) {
+    const room = this.room(roomId, session);
+    requireValue(this.host(session), "forbidden", 403);
+    requireValue(room.status !== "ended", "room_not_found", 404);
+    if (!room.pairing) {
+      let code;
+      do { code = String(randomInt(100000, 1000000)); }
+      while (this.store.get("invites", digest(code)));
+      room.pairing = { code, token: secret() };
+      this.store.put("rooms", room.id, room);
+    }
+    const grant: Invitation = {
+      roomId, epoch: this.store.authEpoch, kind: "guest",
+      invitation: digest(room.pairing.token), code: digest(room.pairing.code),
+      expires: room.expires || this.clock() + 24 * 60 * 60_000,
+    };
+    this.store.put("invites", grant.invitation, grant);
+    this.store.put("invites", grant.code, grant);
+    return { invitation: room.pairing.token, code: room.pairing.code, expires: grant.expires };
   }
   invite(roomId: string, session: Session, kind: unknown = "guest") {
     this.room(roomId, session);
@@ -318,7 +340,13 @@ export class Rooms {
     const host = this.host(session);
     if (type === "enqueue") {
       requireValue(room.status === "open" || host, "room_locked", 403);
-      const song = this.store.get("songs", text(p.songId, 100));
+      let song;
+      if (p.youtube !== undefined) {
+        const videoId = text(p.youtube, 11);
+        requireValue(/^[a-zA-Z0-9_-]{11}$/.test(videoId), "invalid_youtube_id");
+        song = { id: `yt:${videoId}`, title: text(p.title, 200), artist: "YouTube", format: "youtube" as const, videoId };
+        this.store.put("songs", song.id, song);
+      } else song = this.store.get("songs", text(p.songId, 100));
       requireValue(song, "song_not_found", 404);
       room.queue.push({
         id: randomUUID(),
@@ -328,6 +356,13 @@ export class Rooms {
         owner: session.id,
         nickname: session.nickname,
       });
+      return;
+    }
+    if (type === "cheer") {
+      requireValue(session.role !== "display", "forbidden", 403);
+      const message = text(p.message, 120);
+      room.cheers = [...(room.cheers || []).filter((c) => this.clock() - c.time < 8000),
+        { id: randomUUID(), nickname: session.nickname, message, time: this.clock() }].slice(-12);
       return;
     }
     if (type === "remove") {
@@ -344,7 +379,7 @@ export class Rooms {
     }
     requireValue(
       host ||
-        (room.policy.guestControl && ["play", "pause", "skip"].includes(type)),
+        (room.policy.guestControl && ["play", "pause", "skip", "volume", "tempo", "seek"].includes(type)),
       "forbidden",
       403,
     );
@@ -522,6 +557,7 @@ export class Rooms {
         409,
       );
       room.lease.deadline = this.clock() + LIMITS.leaseMs;
+      if (room.expires) room.expires = this.clock() + 24 * 60 * 60_000;
       this.store.put("rooms", room.id, room); // Commit before the grant is returned to the browser.
       this.deadlines.set(generation, this.monotonic() + LIMITS.leaseMs);
       return { generation, leaseMs: LIMITS.leaseMs };
@@ -612,6 +648,11 @@ export class Rooms {
           "ended",
         ].includes(message.state),
       );
+      if (message.score !== undefined) {
+        requireValue(message.score && ["guide", "stability"].includes(message.score.mode));
+        number(message.score.value, 0, 100);
+        number(message.score.samples, 20, 1_000_000);
+      }
       room.position = number(message.position, 0, 86_400);
       room.sampleTime = this.clock();
       room.observed = message.state;
@@ -627,6 +668,10 @@ export class Rooms {
       }
       if (message.state === "ended") {
         requireValue(room.current.confirmed, "playback_unconfirmed", 409);
+        if (message.score) room.scores = [...(room.scores || []), {
+          playbackId: room.current.playbackId, title: room.current.title,
+          nickname: room.current.nickname, value: message.score.value, mode: message.score.mode,
+        }].slice(-20);
         this.next(room);
       }
       if (message.state === "failed") room.desired = "paused";

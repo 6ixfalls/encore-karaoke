@@ -28,12 +28,13 @@
     "lrc"
   ],
   "author": "Encore Karaoke Labs",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "bugs": {
     "url": "https://github.com/Encore-Karaoke-Labs/Encore-Karaoke/issues"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "pitchy": "^4.1.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3"
   },

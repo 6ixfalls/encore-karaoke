@@ -2,7 +2,7 @@
 
 Self-hosted karaoke with a browser display and EnMoku phone controllers. The server runs without Electron, a desktop environment, an audio device, or external relay services. It owns rooms, library indexing, authorization, and queues; the display browser owns playback and lyric timing.
 
-The implemented hosted path supports **MP3 with optional companion LRC**. The [overhaul draft](docs/server-hosted-overhaul-draft.md) describes the larger roadmap. [Implementation status and remaining release gates](docs/server-hosted-implementation.md) distinguish completed code from work still required before release. MIDI, CD+G, conversion, scoring, recording, and phone microphones are not enabled in this hosted build.
+The hosted path supports **local audio/video, MIDI/KAR, companion LRC and CD+G, YouTube queueing/playback, shared cheers, display microphone scoring, and local performance recording**. The [overhaul draft](docs/server-hosted-overhaul-draft.md) describes the larger roadmap. [Implementation status and remaining release gates](docs/server-hosted-implementation.md) distinguish completed code from work still required before release. Native media codecs depend on the display browser. MIDI uses a portable synthesized fallback rather than the desktop soundfont engine. Server conversion remains pending. Phone microphones use room-scoped WebRTC; device/network compatibility still requires validation. See [hosted media features](docs/hosted-media.md) for formats, Nightingale scoring, prepared vocal references, recording and YouTube setup.
 
 ## Run locally
 
@@ -13,13 +13,15 @@ npm ci
 npm run build
 mkdir -p library
 # Place Artist - Song.mp3 and Artist - Song.lrc inside library/.
-# Provision a random credential of at least 24 characters. Keep it private.
-export ADMIN_KEY_FILE=/absolute/path/to/admin-key
 export PUBLIC_BASE_URL=http://localhost:3000
 npm start
 ```
 
-Open [localhost:3000](http://localhost:3000), sign in, create a room, select **Start karaoke on this display**, queue a song, and press **Play / resume**. A host can refresh a guest invitation to show its QR and manual code, or issue a single-use display pairing invitation. A new display must also select **Start karaoke** to unlock browser audio. Keep the display tab visible. Use separate browser profiles/devices for hosts, displays, and guests: cookies identify a device session, not a tab.
+Open [localhost:3000](http://localhost:3000). The dashboard has two choices: **Launch karaoke** opens a TV appliance with its own private room; **Control** joins using that TV's six-digit code. No account, host credential, or administrator panel is required. Clicking **Launch karaoke** enables browser audio and starts the TV immediately; scan its QR on your phone to connect. Scanning opens `/control` and joins the correct room automatically. The code remains stable until **End room**. Phones can queue songs, control playback and enable a microphone with browser permission. Rooms have separate queues, playback, pairing grants and owners. Inactive public rooms expire after 24 hours; active TVs renew that lifetime.
+
+The TV presentation reuses the desktop's standby, player, QR, menu and queue styles. Native-only desktop services and MIDI synthesis still differ. Core assets are local. Phone audio uses direct WebRTC and may require the phone and TV to be on the same network; no TURN relay is configured. Keep the TV tab visible. Use separate browser profiles/devices for TVs and phones: cookies identify a device session, not a tab.
+
+The server currently uses SQLite for room/session coordination and library indexing; visitors do not provision storage or credentials. Recordings stay in the browser. Operators may use temporary storage if restart persistence is unnecessary. Optional administrator credentials protect maintenance APIs (library rescans and physical display recovery); these APIs have no user-facing admin panel.
 
 For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_BASE_URL`; a LAN IP served over HTTP is rejected. Follow the [operator guide](docs/server-hosted-operations.md) for Docker, local DNS/TLS, backups, and lost-display recovery.
 
@@ -28,15 +30,14 @@ For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_B
 | Variable                        | Default / purpose                                                                        |
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
 | `PUBLIC_BASE_URL`               | `http://localhost:3000`; exact origin used for invitations, Origin checks, and Socket.IO |
-| `ADMIN_KEY_FILE` or `ADMIN_KEY` | Required, at least 24 characters; provision outside the library and backups              |
-| `HOST_KEY_FILE` or `HOST_KEY`   | Optional separate host credential, at least 24 characters                                |
 | `DATA_DIR`                      | `./data`; SQLite, server settings, room state, sessions, audit records                   |
 | `LIBRARY_DIR`                   | `./library`; mount read-only; filenames supply artist/title; same-stem `.lrc` companions |
+| `INVIDIOUS_URL` | Base origin of your Invidious instance (for example `https://invidious.example.com`); enables YouTube search and proxied native playback without API keys |
 | `WEB_DIR`                       | `./dist/web`; compiled browser assets                                                    |
 | `PORT` / `LISTEN_HOST`          | `3000` / `0.0.0.0`; bind loopback when testing without a proxy                           |
 | `TRUSTED_PROXIES`               | Empty by default; comma-separated trusted reverse-proxy IPs or CIDRs; Compose trusts only its Caddy address |
 
-The web server exposes no filesystem browser, arbitrary file API, native IPC bridge, or legacy relay. It serves only the built hosted frontend and registered authorized media. Required fonts, scripts, icons, and QR generation are local. The old renderer modules remain as reference material for later playback parity; they are excluded from the hosted build and runtime.
+The web server exposes no filesystem browser, arbitrary file API, native IPC bridge, or legacy relay. It serves only the built hosted frontend and registered authorized media. Core fonts, scripts, icons, and QR generation are local. YouTube search and streaming use the configured Invidious instance through authenticated same-origin server routes. The display uses native video with Web Audio for scoring and mixed recording. Desktop presentation styles are shared with the hosted TV; native renderer services remain excluded from the hosted runtime.
 
 ## Development and checks
 
@@ -63,4 +64,4 @@ Tests cover room authority, three concurrent Socket.IO controllers, reservation/
 - `deploy/`: non-root container and Caddy/Compose LAN HTTPS example.
 - `tests/server/`: state, recovery, transport, and browser-player tests.
 
-Encore includes no song library. Use media you have permission to use. No ads, tracking, or external analytics are included. Original credits and asset licensing are retained in the source assets and repository history. Licensed under [MIT](LICENSE.txt).
+Encore includes no song library. Use media you have permission to use. No ads, tracking, or external analytics are included. Original credits and asset licensing are retained in the source assets and repository history. Distributed under [GNU GPL-3.0-only](LICENSE.txt). Nightingale-derived scoring and retained MIT notices are documented in [third-party notices](THIRD_PARTY_NOTICES.md). The built app provides license, credits and corresponding source downloads.

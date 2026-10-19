@@ -6,10 +6,8 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the trusted HTTPS origin}
-      ADMIN_KEY_FILE: /run/secrets/admin_key
-      HOST_KEY_FILE: /run/secrets/host_key
+      INVIDIOUS_URL: ${INVIDIOUS_URL:-}
       TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
-    secrets: [admin_key, host_key]
     volumes:
       - encore-data:/data
       - encore-cache:/cache
@@ -38,11 +36,6 @@ services:
     depends_on:
       encore:
         condition: service_healthy
-secrets:
-  admin_key:
-    file: ./secrets/admin_key
-  host_key:
-    file: ./secrets/host_key
 volumes:
   encore-data:
   encore-cache:

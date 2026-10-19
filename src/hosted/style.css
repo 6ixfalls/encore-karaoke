@@ -343,3 +343,24 @@ footer {
     font-size: 14px;
   }
 }
+
+#local-media, #cdg-player { width: 100%; max-width: 960px; margin: 1rem auto; }
+#local-media, #cdg-player { max-height: 60vh; object-fit: contain; }
+#cdg-player { image-rendering: pixelated; }
+#cheers { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+.cheer { border-radius: 1rem; background: #4a296c; padding: .6rem 1rem; overflow-wrap: anywhere; }
+#recordings a, #scores span { display: block; margin: .6rem 0; }
+#performance-status, #score { color: #ffce73; }
+
+.dashboard { display: grid; place-items: center; }
+.dashboard main { width: min(100%, 960px); }
+.dashboard-option { display: block; text-decoration: none; color: inherit; padding: 40px; transition: border-color .2s, transform .2s; }
+.dashboard-option:hover { border-color: var(--accent); transform: translateY(-3px); }
+.dashboard-option > span { font-size: 48px; color: var(--accent); display: block; margin-bottom: 32px; }
+.dashboard-option p { color: var(--muted); }
+body.control #login-form, body.tv #join-form { display: none; }
+body.control #welcome .columns, body.tv #welcome .columns { grid-template-columns: 1fr; max-width: 540px; }
+
+.dashboard > header, .dashboard footer, .dashboard #welcome, .dashboard #lobby, .dashboard #room { display: none; }
+
+#recordings video, #recordings audio { display: block; width: 100%; max-width: 960px; margin: 1rem auto; }

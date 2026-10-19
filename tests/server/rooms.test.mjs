@@ -13,8 +13,6 @@ function setup(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "encore-test-"));
   let store = new Store(directory);
   const config = {
-    adminKey: "a".repeat(32),
-    hostKey: "h".repeat(32),
     secure: false,
   };
   let auth = new Auth(store, config);
@@ -431,9 +429,9 @@ test("LRC parser shares desktop timing and supports repeated timestamps, offsets
   );
 });
 
-test("fresh host login retains room ownership, and cancelling a loading reservation stops its playback intent", t => {
+test("explicit owner identity retains room ownership, and cancelling a loading reservation stops its playback intent", t => {
   const f = setup(t), guest = f.guest();
-  const hostLogin = f.auth.create("host", "Host again").session;
+  const hostLogin = f.auth.create("host", "Host again", f.host.principal).session;
   assert.equal(f.rooms.room(f.room.id, hostLogin).id, f.room.id);
   f.command(guest, "enqueue", { songId: f.song.id });
   f.rooms.claim(f.room.id, f.host);
@@ -480,4 +478,55 @@ test("new devices cannot bypass the global command budget", t => {
   assert.equal(f.store.all("commands").length, 100);
   f.advance(10_001);
   assert.equal(f.command(guest, "pause").error, "forbidden");
+});
+
+test("YouTube reservations share admission, validation, retry identity and confirmed playback rules", t => {
+  const f = setup(t), guest = f.guest();
+  const payload = { youtube: "M7lc1UVf-VE", title: "A karaoke video" };
+  assert.equal(f.command(guest, "enqueue", { ...payload, youtube: "https://evil.invalid" }).accepted, false);
+  assert.equal(f.store.all("songs").length, 1);
+  const command = { commandId: "youtube-retry", type: "enqueue", payload };
+  assert.equal(f.rooms.command(f.room.id, guest, command).accepted, true);
+  assert.equal(f.rooms.command(f.room.id, guest, command).accepted, true);
+  let room = f.store.get("rooms", f.room.id);
+  assert.equal(room.queue.length, 1);
+  assert.equal(room.queue[0].songId, "yt:M7lc1UVf-VE");
+  assert.equal(f.store.get("songs", room.queue[0].songId).videoId, payload.youtube);
+  const lease = f.rooms.claim(room.id, f.host);
+  assert.equal(f.command(f.host, "play").accepted, true);
+  room = f.store.get("rooms", room.id);
+  f.rooms.telemetry(room.id, f.host, { leaseGeneration: lease.generation, playbackId: room.current.playbackId, position: 0, state: "playing" });
+  assert.equal(f.store.get("rooms", room.id).queue.length, 0);
+});
+
+test("cheers are bounded, literal, shared and deduplicated for guests without playback permission", t => {
+  const f = setup(t), guest = f.guest();
+  assert.equal(f.command(guest, "play").error, "forbidden");
+  const command = { commandId: "cheer-retry", type: "cheer", payload: { message: "<img src=x> Great song!" } };
+  assert.equal(f.rooms.command(f.room.id, guest, command).accepted, true);
+  f.rooms.command(f.room.id, guest, command);
+  let snapshot = f.rooms.snapshot(f.store.get("rooms", f.room.id), guest);
+  assert.equal(snapshot.cheers.length, 1);
+  assert.equal(snapshot.cheers[0].message, command.payload.message);
+  assert.equal(f.command(guest, "cheer", { message: "x".repeat(121) }).accepted, false);
+  f.advance(8001);
+  snapshot = f.rooms.snapshot(f.store.get("rooms", f.room.id), guest);
+  assert.equal(snapshot.cheers.length, 0);
+});
+
+test("completed display scores are fenced, validated and preserved with the singer", t => {
+  const f = setup(t);
+  f.command(f.host, "enqueue", { songId: f.song.id });
+  const lease = f.rooms.claim(f.room.id, f.host);
+  f.command(f.host, "play");
+  const current = f.store.get("rooms", f.room.id).current;
+  const report = { leaseGeneration: lease.generation, playbackId: current.playbackId, position: 1, state: "playing" };
+  f.rooms.telemetry(f.room.id, f.host, report);
+  assert.throws(() => f.rooms.telemetry(f.room.id, f.host, { ...report, state: "ended", score: { value: 101, samples: 20, mode: "guide" } }));
+  f.rooms.telemetry(f.room.id, f.host, { ...report, state: "ended", score: { value: 92, samples: 200, mode: "guide" } });
+  const room = f.store.get("rooms", f.room.id);
+  assert.equal(room.scores.length, 1);
+  assert.equal(room.scores[0].value, 92);
+  assert.equal(room.scores[0].nickname, f.host.nickname);
+  assert.throws(() => f.rooms.telemetry(f.room.id, f.host, { ...report, state: "ended" }), /stale_playback/);
 });

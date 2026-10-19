@@ -1,5 +1,4 @@
 import path from "node:path";
-import fs from "node:fs";
 import { requireValue } from "../shared/contracts.js";
 
 export function configuration(env: NodeJS.ProcessEnv = process.env) {
@@ -19,18 +18,10 @@ export function configuration(env: NodeJS.ProcessEnv = process.env) {
       (local && publicUrl.protocol === "http:"),
     "https_required",
   );
-  const credential = (name: string, required: boolean) => {
-    const filename = env[`${name}_FILE`];
-    const value = filename
-      ? fs.readFileSync(filename, "utf8").trim()
-      : env[name];
-    requireValue(
-      (!required && !value) ||
-        (typeof value === "string" && value.length >= 24),
-      `${name.toLowerCase()}_must_have_24_characters`,
-    );
-    return value;
-  };
+  const invidious = env.INVIDIOUS_URL ? new URL(env.INVIDIOUS_URL) : undefined;
+  requireValue(!invidious || (["http:", "https:"].includes(invidious.protocol) &&
+    !invidious.username && !invidious.password && invidious.pathname === "/" &&
+    !invidious.search && !invidious.hash), "invalid_invidious_url");
   return {
     origin: publicUrl.origin,
     secure: publicUrl.protocol === "https:",
@@ -39,9 +30,8 @@ export function configuration(env: NodeJS.ProcessEnv = process.env) {
     data: path.resolve(env.DATA_DIR || "data"),
     library: path.resolve(env.LIBRARY_DIR || "library"),
     web: path.resolve(env.WEB_DIR || "dist/web"),
-    adminKey: credential("ADMIN_KEY", true),
-    hostKey: credential("HOST_KEY", false),
     maxTransfers: 16,
+    invidiousUrl: invidious?.origin,
     trustedProxies: (env.TRUSTED_PROXIES || "").split(",").map((ip) => ip.trim()).filter(Boolean),
   };
 }
