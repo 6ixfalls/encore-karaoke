@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BrowserPlayer } from "../../src/hosted/player.js";
+import { PerformanceTools } from "../../src/hosted/performance.js";
 
 class AudioElement extends EventTarget {
   constructor() {
@@ -545,12 +546,53 @@ test("YouTube streams use the native media element and the existing fenced audio
   const { player, service, room } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
-  service.request = async () => ({ format: "youtube", videoId: "M7lc1UVf-VE" });
+  service.request = async (path) => path.includes("/api/library/songs/") ?
+    { format: "youtube", videoId: "M7lc1UVf-VE" } : path.endsWith("/separation") ?
+      { id: "job", media: `/media/separation/job?roomId=${room.id}` } : { complete: true };
   await player.update({ ...room, desired: "playing", current: { playbackId: "video", songId: "yt:M7lc1UVf-VE" } });
   assert.equal(player.audio, player.localMedia);
   assert.equal(player.audio.hidden, false);
-  assert.equal(player.audio.src, `/media/youtube/M7lc1UVf-VE?roomId=${room.id}`);
+  assert.equal(player.audio.src, `/media/separation/job?roomId=${room.id}`);
   player.disconnected();
   assert.equal(player.audio.paused, true);
   assert.equal(player.gate.gain.events.at(-1).value, 0);
+});
+
+test("YouTube finalization retires progress polls before accepting the final reference", async t => {
+  for (const outcome of ["older snapshot", "incomplete snapshot", "request failure"]) {
+    await t.test(outcome, async t => {
+      const { player, service, reports, errors } = fixture(t);
+      await player.initialize();
+      player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+      const tools = new PerformanceTools({ status() {}, score() {}, recording() {} });
+      tools.beginLiveReference();
+      player.performanceTools = tools;
+      player.loaded = "video";
+      player.separation = { id: "job", roomId: "room-1" };
+      const snapshot = (through, complete) => ({ pitches: Array(100).fill(440),
+        step: 1024 / 44100, through, singable: 2, complete });
+      let resolvePoll, rejectPoll, requests = 0;
+      service.request = () => ++requests === 1 ? new Promise((resolve, reject) => {
+        resolvePoll = resolve;
+        rejectPoll = reject;
+      }) : Promise.resolve(snapshot(20, true));
+      const polling = player.pollSeparation(player.loadingVersion, "video");
+      player.report("ended");
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(reports.at(-1).state, "ended");
+
+      if (outcome === "request failure") rejectPoll(new Error("network_error"));
+      else resolvePoll(snapshot(outcome === "older snapshot" ? 16 : 20, false));
+      await polling;
+      await player.pollSeparation(player.loadingVersion, "video");
+
+      assert.equal(requests, 2);
+      assert.equal(tools.liveReference.through, 20);
+      assert.equal(tools.liveReference.complete, true);
+      assert.equal(player.loaded, "video");
+      assert.deepEqual(errors, []);
+      assert.deepEqual(reports.map(report => report.state), ["ended"]);
+      assert.equal(player.separationTimer, undefined);
+    });
+  }
 });

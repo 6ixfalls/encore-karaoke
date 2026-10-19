@@ -55,6 +55,11 @@ export class BrowserPlayer {
     }
   }
   clearMedia() {
+    const separation = this.separation;
+    this.separation = null;
+    clearTimeout(this.separationTimer);
+    if (separation) this.services.request(`/api/rooms/${separation.roomId}/separation/${separation.id}/stop`,
+      { method: "POST", body: {} }).catch(() => {});
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
@@ -178,6 +183,22 @@ export class BrowserPlayer {
     await this.stop();
   }
   report(state, playbackId = this.loaded) {
+    if (state === "ended" && this.separation && !this.separation.finalized) {
+      const job = this.separation;
+      if (!job.finishing) {
+        job.finishing = true;
+        clearTimeout(this.separationTimer);
+        this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`).then(snapshot => {
+          if (this.separation !== job || this.loaded !== playbackId || !this.valid()) return;
+          this.performanceTools?.updateLiveReference?.(snapshot);
+          job.finalized = true;
+          this.report(state, playbackId);
+        }).catch(error => {
+          if (this.separation === job) this.failPlayback(error, playbackId);
+        });
+      }
+      return;
+    }
     this.telemetry({
       leaseGeneration: this.generation,
       playbackId,
@@ -251,8 +272,17 @@ export class BrowserPlayer {
           return buffer;
         };
         if (song.format === "youtube") {
-          this.audio.src = `/media/youtube/${encodeURIComponent(song.videoId)}?roomId=${encodeURIComponent(room.id)}`;
+          const separated = await this.services.request(`/api/rooms/${room.id}/separation`,
+            { method: "POST", body: { playbackId } });
+          if (version !== this.loadingVersion || !this.valid()) {
+            this.services.request(`/api/rooms/${room.id}/separation/${separated.id}/stop`, { method: "POST", body: {} }).catch(() => {});
+            return;
+          }
+          this.separation = { id: separated.id, roomId: room.id };
+          this.audio.src = separated.media;
           this.audio.hidden = false;
+          this.performanceTools?.beginLiveReference?.();
+          this.pollSeparation(version, playbackId);
         } else if (song.format === "midi") {
           const midi = parseMidi(await getBuffer(song.assetId, 4 * 1024 * 1024));
           const blob = await renderMidi(midi);
@@ -287,7 +317,7 @@ export class BrowserPlayer {
           this.lines = lines;
         }
         if (version !== this.loadingVersion || !this.valid()) return;
-        await this.performanceTools?.prepareReference?.(this, song, getBuffer,
+        if (song.format !== "youtube") await this.performanceTools?.prepareReference?.(this, song, getBuffer,
           () => version === this.loadingVersion && this.valid() && this.loaded === playbackId);
         if (version !== this.loadingVersion || !this.valid()) return;
         this.loading = false;
@@ -331,6 +361,18 @@ export class BrowserPlayer {
       }
     } else this.audio.pause();
   }
+  async pollSeparation(version, playbackId) {
+    const job = this.separation;
+    if (!job || job.finishing || version !== this.loadingVersion || !this.valid()) return;
+    try {
+      const snapshot = await this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`);
+      if (this.separation !== job || job.finishing || version !== this.loadingVersion || !this.valid()) return;
+      this.performanceTools?.updateLiveReference?.(snapshot);
+      if (!snapshot.complete) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
+    } catch (error) {
+      if (this.separation === job && !job.finishing && version === this.loadingVersion) this.failPlayback(error, playbackId);
+    }
+  }
   failPlayback(error, playbackId) {
     this.loadingVersion++;
     this.loaded = null;
@@ -363,6 +405,7 @@ export class BrowserPlayer {
       this.clearMedia();
     }
     this.audio.pause();
+    if (this.separation) { this.loaded = null; this.clearMedia(); }
     this.performanceTools?.stopMicrophone();
     // The armed audio-thread cutoff remains in force during a bounded reconnect grace period.
     // A reconnect never opens output by itself; a successful lease renewal must rearm it.

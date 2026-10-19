@@ -16,7 +16,8 @@ declare module "express-serve-static-core" {
 import express from "express";
 import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
-import { Invidious } from "./invidious.js";
+import { YouTube } from "./youtube.js";
+import { Separations } from "./separation.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
@@ -36,7 +37,8 @@ export function createApplication(store: Store, config: Configuration) {
     requireValue(req.session, "unauthorized", 401);
     return req.session;
   };
-  const invidious = new Invidious(config.invidiousUrl);
+  const youtube = new YouTube(config.ytDlp);
+  const separations = new Separations(config, youtube);
   let transfers = 0;
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustedProxies?.length ? config.trustedProxies : false);
@@ -227,7 +229,51 @@ export function createApplication(store: Store, config: Configuration) {
     rooms.room(String(req.query.roomId || ""), authenticated(req));
     auth.throttle(`youtube:${authenticated(req).id}`, 10);
     auth.throttle("youtube:global", 100);
-    res.json({ items: await invidious.search(text(req.query.q, 200)) });
+    res.json({ items: await youtube.search(text(req.query.q, 200)) });
+  });
+  app.post("/api/rooms/:roomId/separation", async (req, res) => {
+    const session = authenticated(req), room = rooms.room(req.params.roomId, session);
+    requireValue(room.lease?.deviceId === session.id && rooms.available(room) && !room.lease.releaseRequested, "display_required", 403);
+    requireValue(room.current && room.current.playbackId === req.body.playbackId, "stale_playback", 409);
+    const song = store.get("songs", room.current.songId);
+    requireValue(song?.format === "youtube" && song.videoId, "youtube_song_required");
+    const playbackId = room.current.playbackId, generation = room.lease.generation;
+    const current = () => {
+      const active = store.get("rooms", room.id);
+      return !!auth.session(req.headers.cookie) && !!active && active.status !== "ended" &&
+        active.current?.playbackId === playbackId && active.lease?.generation === generation &&
+        active.lease?.deviceId === session.id && !active.lease?.releaseRequested && rooms.available(active);
+    };
+    const job = await separations.create(room.id, playbackId, session.id, song.videoId, current);
+    res.status(201).json({ id: job.id, media: `/media/separation/${job.id}?roomId=${room.id}` });
+  });
+  app.get("/api/rooms/:roomId/separation/:id", (req, res) => {
+    const session = authenticated(req);
+    rooms.room(req.params.roomId, session);
+    const job = separations.get(req.params.id, req.params.roomId, session.id);
+    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete });
+  });
+  app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {
+    separations.stopOwned(req.params.id, req.params.roomId, authenticated(req).id);
+    res.json({ ok: true });
+  });
+  app.head("/media/separation/:id", (req, res) => {
+    const session = authenticated(req), roomId = String(req.query.roomId || "");
+    rooms.room(roomId, session);
+    separations.get(req.params.id, roomId, session.id);
+    res.set({ "Content-Type": "video/mp4", "Cache-Control": "no-store", "Accept-Ranges": "none" }).end();
+  });
+  app.get("/media/separation/:id", (req, res) => {
+    const session = authenticated(req), roomId = String(req.query.roomId || "");
+    rooms.room(roomId, session);
+    const job = separations.get(req.params.id, roomId, session.id);
+    requireValue(!job.claimed, "separation_stream_already_open", 409);
+    requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
+    job.claimed = true; transfers++;
+    res.set({ "Content-Type": "video/mp4", "Cache-Control": "no-store", "Accept-Ranges": "none" });
+    res.once("close", () => { transfers--; if (!res.writableFinished) separations.stop(job.id); });
+    job.output.on("error", () => res.destroy());
+    job.output.pipe(res);
   });
   app.get("/media/youtube/:id", async (req, res) => {
     const session = authenticated(req);
@@ -245,7 +291,7 @@ export function createApplication(store: Store, config: Configuration) {
     };
     res.once("close", finish);
     try {
-      const upstream = await invidious.stream(req.params.id, req.headers.range, controller.signal, req.method === "HEAD");
+      const upstream = await youtube.stream(req.params.id, req.headers.range, controller.signal, req.method === "HEAD");
       if (finished) { await upstream.body?.cancel(); return; }
       res.status(upstream.status);
       for (const name of ["content-type", "content-length", "content-range", "accept-ranges"]) {
@@ -519,6 +565,7 @@ export function createApplication(store: Store, config: Configuration) {
   });
   let sweepCount = 0;
   const sweep = setInterval(() => {
+    separations.sweep();
     for (const room of store.all("rooms")) {
       if (room.expires && room.expires < Date.now() && room.status !== "ended") {
         room.status = "ended";
@@ -558,9 +605,12 @@ export function createApplication(store: Store, config: Configuration) {
     auth,
     rooms,
     library,
+    youtube,
+    separations,
     publish,
     async close() {
       clearInterval(sweep);
+      separations.close();
       await new Promise<void>((resolve) => io.close(() => resolve()));
       store.close();
     },

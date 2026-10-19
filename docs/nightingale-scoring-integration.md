@@ -45,10 +45,11 @@ melody from an instrumental karaoke video.
   Comparison samples the midpoint of the credited interval, avoiding the loss
   of a complete final interval at a MIDI note boundary.
 - Kept reference preparation separate from progressive backing-track playback.
-  The reference file is decoded/scanned before playback. Automatic original-song
-  acquisition, ML stem separation, transcription and melody generation are not
-  included in this port. Existing prepared references are required for YouTube
-  melody scoring.
+  Local reference files are decoded/scanned before playback. The YouTube path
+  now streams source audio through the maintained Demucs fork
+  and builds live pitch references incrementally; local files can still use
+  prepared sidecars. Automatic transcription and sourcing an original vocal
+  recording when the queued track has no vocals are not implemented.
 
 The current phone microphone route feeds the TV output gate. It does not feed
 the display-local scoring analyser. Scoring phone singers requires a per-phone

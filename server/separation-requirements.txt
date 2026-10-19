@@ -1,0 +1,7 @@
+# Python 3.10–3.13 (the container uses Python 3.11).
+# CPU torch wheels can be installed first from https://download.pytorch.org/whl/cpu
+# The maintained fork is pinned, not the archived facebookresearch package.
+torch==2.8.0
+numpy==2.2.6
+yt-dlp[default]==2026.8.19
+demucs @ https://github.com/adefossez/demucs/archive/2883f3db65617d6d178c6ed10d869dc14e44e59b.tar.gz

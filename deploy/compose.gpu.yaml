@@ -1,0 +1,18 @@
+# Overlay: docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+services:
+  encore:
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu128
+    environment:
+      SEPARATION_DEVICE: ${SEPARATION_DEVICE:-cuda:0}
+      FFMPEG_VIDEO_MODE: ${FFMPEG_VIDEO_MODE:-nvidia}
+      FFMPEG_GPU: ${FFMPEG_GPU:-0}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 
 await fs.mkdir("dist/web/assets/fonts", { recursive: true });
+await fs.copyFile("server/separation_worker.py", "dist/server/separation_worker.py");
 await esbuild.build({
   entryPoints: ["src/hosted/app.js"],
   bundle: true,
@@ -36,7 +37,7 @@ console.log("Hosted browser build complete (core assets local; YouTube loads on 
 await fs.copyFile("LICENSE.txt", "dist/web/LICENSE.txt");
 await fs.copyFile("THIRD_PARTY_NOTICES.md", "dist/web/THIRD_PARTY_NOTICES.txt");
 // Ship the exact build inputs with every browser/container distribution.
-execFileSync("tar", ["-czf", "dist/web/source.tar.gz", "--exclude=.DS_Store",
+execFileSync("tar", ["-czf", "dist/web/source.tar.gz", "--exclude=.DS_Store", "--exclude=__pycache__",
   "package.json", "package-lock.json", "tsconfig.server.json", "build-server.mjs",
   "eslint.config.js", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "README.md",
-  "server", "shared", "src", "tests", "docs", "deploy/Dockerfile", "deploy/compose.yaml", "deploy/Caddyfile"]);
+  "server", "shared", "src", "tests", "docs", "deploy/Dockerfile", "deploy/compose.yaml", "deploy/compose.gpu.yaml", "deploy/Caddyfile"]);

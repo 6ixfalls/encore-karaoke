@@ -147,3 +147,8 @@ ozone-layer/
 /library/
 /deploy/secrets/
 /deploy/.env
+
+# Python live separation runtime
+__pycache__/
+*.py[cod]
+.venv-separation/

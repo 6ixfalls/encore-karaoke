@@ -6,3 +6,6 @@ dist
 deploy/secrets
 .env
 *.log
+
+__pycache__
+.venv-separation

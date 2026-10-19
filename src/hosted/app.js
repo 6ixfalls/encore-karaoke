@@ -208,6 +208,7 @@ function render(snapshot) {
     : "";
   $("display-controls").hidden = !isHost() && session.role !== "display";
   $("play-controls").hidden = !room.canControl;
+  $("seek-form").hidden = !room.canControl || room.seekable === false;
   $("host-tools").hidden = !isHost();
   $("youtube-form").hidden = session.role === "display";
   $("cheer-form").hidden = session.role === "display";

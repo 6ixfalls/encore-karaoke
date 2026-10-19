@@ -1,0 +1,166 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { PassThrough, type Readable, type Writable } from "node:stream";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { PitchDetector } from "pitchy";
+import type { Configuration } from "./config.js";
+import type { VideoSource, YouTube } from "./youtube.js";
+import { requireValue, Fault } from "../shared/contracts.js";
+
+const RATE = 44100, WINDOW = 2048, HOP = 1024;
+export class VocalFrames {
+  pitches: (number | null)[] = [];
+  samples = 0;
+  singable = 0;
+  private carry = new Float32Array(0);
+  private detector = PitchDetector.forFloat32Array(WINDOW);
+  accept(packet: { start: number; samples: number; vocals: string }) {
+    requireValue(packet.start === this.samples && Number.isInteger(packet.samples) && packet.samples > 0 &&
+      packet.samples <= 8 * RATE && typeof packet.vocals === "string", "invalid_vocal_packet", 502);
+    const bytes = Buffer.from(packet.vocals, "base64");
+    requireValue(bytes.length === packet.samples * 4 && this.samples + packet.samples <= 600 * RATE, "vocal_packet_limit", 502);
+    const pcm = new Float32Array(this.carry.length + packet.samples);
+    pcm.set(this.carry);
+    for (let i = 0; i < packet.samples; i++) {
+      const value = bytes.readFloatLE(i * 4);
+      requireValue(Number.isFinite(value), "invalid_vocal_pcm", 502);
+      pcm[this.carry.length + i] = value;
+    }
+    let offset = 0;
+    while (offset + WINDOW <= pcm.length) {
+      const window = pcm.subarray(offset, offset + WINDOW);
+      let sum = 0;
+      for (const value of window) sum += value * value;
+      const [hz, clarity] = Math.sqrt(sum / WINDOW) >= 0.005 ? this.detector.findPitch(window, RATE) : [0, 0];
+      const pitch = hz >= 80 && hz <= 1000 && clarity >= 0.4 ? hz : null;
+      this.pitches.push(pitch);
+      if (pitch !== null) this.singable += HOP / RATE;
+      offset += HOP;
+    }
+    this.carry = pcm.slice(offset);
+    this.samples += packet.samples;
+  }
+  snapshot() { return { pitches: this.pitches, step: HOP / RATE, through: this.samples / RATE, singable: this.singable }; }
+}
+
+export interface SeparationJob {
+  id: string; roomId: string; playbackId: string; deviceId: string;
+  current: () => boolean; output: PassThrough; processes: ChildProcess[];
+  controller: AbortController; frames: VocalFrames; state: "loading" | "processing" | "complete" | "failed";
+  error?: string; claimed: boolean; started: number; progress: number; referenceComplete: boolean;
+}
+export type Launcher = (command: string, args: string[], options: Parameters<typeof spawn>[2]) => ChildProcess;
+
+export class Separations {
+  jobs = new Map<string, SeparationJob>();
+  constructor(private config: Configuration, private youtube: Pick<YouTube, "resolve">, private launch: Launcher = spawn) {}
+  async create(roomId: string, playbackId: string, deviceId: string, videoId: string, current: () => boolean) {
+    for (const job of this.jobs.values()) {
+      if (!job.current()) this.stop(job.id);
+    }
+    const existing = [...this.jobs.values()].find(j => j.roomId === roomId && j.playbackId === playbackId && j.deviceId === deviceId);
+    if (existing && existing.current() && existing.state !== "failed") return existing;
+    if (existing) this.stop(existing.id);
+    requireValue(this.jobs.size < (this.config.maxSeparations || 1), "separation_busy", 503);
+    const job: SeparationJob = { id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
+      processes: [], controller: new AbortController(), frames: new VocalFrames(), state: "loading", claimed: false,
+      started: Date.now(), progress: Date.now(), referenceComplete: false };
+    job.output.on("error", () => {});
+    // A full output pipe can intentionally suspend the entire processing chain.
+    // Give inference a fresh stall interval when the consumer resumes reading.
+    job.output.on("drain", () => { job.progress = Date.now(); });
+    this.jobs.set(job.id, job);
+    try {
+      const source = await this.youtube.resolve(videoId, job.controller.signal);
+      requireValue(current() && this.jobs.has(job.id), "stale_display", 409);
+      this.start(job, source);
+      return job;
+    } catch (error) { this.stop(job.id); throw error; }
+  }
+  private start(job: SeparationJob, source: VideoSource) {
+    const process = (command: string, args: string[], extra = {}) => {
+      const child = this.launch(command, args, { stdio: ["pipe", "pipe", "pipe", "pipe"], ...extra });
+      job.processes.push(child);
+      child.on("error", () => this.fail(job, "separation_dependency_unavailable"));
+      child.stdin?.on("error", () => {});
+      child.stderr?.resume(); // Never expose signed URLs or subprocess diagnostics to clients.
+      child.on("close", code => { if (code !== 0 && this.jobs.has(job.id)) this.fail(job, "separation_process_failed"); });
+      return child;
+    };
+    const network = (url: string) => ["-nostdin", "-v", "error", "-rw_timeout", "30000000", "-user_agent", source.userAgent, "-i", url];
+    const decoder = process(this.config.ffmpeg || "ffmpeg", [...network(source.audioUrl || source.url), "-t", "600", "-vn", "-f", "f32le", "-ar", "44100", "-ac", "2", "pipe:1"]);
+    decoder.stdin?.end();
+    const worker = process(this.config.python || "python3", ["-u", fileURLToPath(new URL("./separation_worker.py", import.meta.url))],
+      { env: { ...globalThis.process.env, SEPARATION_DEVICE: this.config.separationDevice || "cpu" } });
+    const gpu = this.config.ffmpegGpu || "0";
+    const nvidia = this.config.ffmpegVideoMode === "nvidia";
+    // CUDA input options belong before the video input; PCM audio stays on CPU.
+    const videoInput = nvidia ? ["-hwaccel", "cuda", "-hwaccel_device", gpu, "-hwaccel_output_format", "cuda"] : [];
+    const videoOutput = nvidia
+      ? ["-c:v", "h264_nvenc", "-gpu", gpu, "-preset", "p4", "-tune", "ll", "-b:v", "5M", "-g", "60", "-bf", "0"]
+      : ["-c:v", "copy"];
+    const mux = process(this.config.ffmpeg || "ffmpeg", [...videoInput, ...network(source.url), "-f", "f32le", "-ar", "44100", "-ac", "2", "-i", "pipe:3",
+      "-map", "0:v:0", "-map", "1:a:0", ...videoOutput, "-c:a", "aac", "-b:a", "192k", "-t", "600", "-shortest",
+      "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]);
+    mux.stdin?.end();
+    const backing = mux.stdio[3] as Writable;
+    backing.on("error", () => {});
+    decoder.stdout!.pipe(worker.stdin!);
+    worker.stdout!.pipe(backing);
+    mux.stdout!.pipe(job.output);
+    let pending = "";
+    const reference = worker.stdio[3] as Readable;
+    reference.setEncoding("utf8");
+    reference.on("data", (part: string) => {
+      pending += part;
+      if (pending.length > 2 * 1024 * 1024) { this.fail(job, "vocal_packet_limit"); return; }
+      let end;
+      while ((end = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, end); pending = pending.slice(end + 1);
+        try {
+          job.frames.accept(JSON.parse(line)); job.progress = Date.now(); job.state = "processing";
+        } catch { this.fail(job, "invalid_vocal_packet"); return; }
+      }
+    });
+    worker.on("close", code => {
+      if (code === 0 && pending.length === 0 && job.frames.samples > 0) job.referenceComplete = true;
+    });
+    mux.on("close", code => {
+      if (code === 0 && job.state !== "failed") job.state = "complete";
+    });
+  }
+  get(id: string, roomId: string, deviceId: string) {
+    const job = this.jobs.get(id);
+    requireValue(job && job.roomId === roomId && job.deviceId === deviceId, "separation_not_found", 404);
+    requireValue(job.current(), "stale_display", 409);
+    requireValue(job.state !== "failed", job.error || "separation_failed", 502);
+    return job;
+  }
+  fail(job: SeparationJob, error: string) {
+    if (job.state === "failed") return;
+    job.state = "failed"; job.error = error;
+    job.controller.abort();
+    job.processes.forEach(child => child.kill("SIGKILL"));
+    job.output.destroy(new Fault(error, 502));
+  }
+  stopOwned(id: string, roomId: string, deviceId: string) {
+    const job = this.jobs.get(id);
+    requireValue(job && job.roomId === roomId && job.deviceId === deviceId, "separation_not_found", 404);
+    this.stop(id);
+  }
+  stop(id: string) {
+    const job = this.jobs.get(id);
+    if (!job) return;
+    this.jobs.delete(id); job.controller.abort();
+    job.processes.forEach(child => child.kill("SIGKILL")); job.output.destroy();
+  }
+  sweep() {
+    const now = Date.now();
+    for (const job of this.jobs.values()) {
+      if (!job.current() || now - job.started > 30 * 60_000) this.stop(job.id);
+      else if (job.claimed && job.output.writableNeedDrain) job.progress = now;
+      else if (job.state !== "complete" && job.state !== "failed" && now - job.progress > 120000) this.fail(job, "separation_stalled");
+    }
+  }
+  close() { for (const id of this.jobs.keys()) this.stop(id); }
+}

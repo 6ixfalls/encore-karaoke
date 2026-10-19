@@ -495,8 +495,43 @@ test("YouTube reservations share admission, validation, retry identity and confi
   const lease = f.rooms.claim(room.id, f.host);
   assert.equal(f.command(f.host, "play").accepted, true);
   room = f.store.get("rooms", room.id);
+  assert.equal(f.rooms.snapshot(room, f.host).seekable, false);
+  assert.equal(f.command(f.host, "seek", { position: 30 }).error, "live_separation_not_seekable");
   f.rooms.telemetry(room.id, f.host, { leaseGeneration: lease.generation, playbackId: room.current.playbackId, position: 0, state: "playing" });
   assert.equal(f.store.get("rooms", room.id).queue.length, 0);
+});
+
+test("display takeover restarts sequential YouTube streams and resumes local media", async t => {
+  for (const youtube of [true, false]) {
+    await t.test(youtube ? "YouTube restarts" : "local media resumes", t => {
+      const f = setup(t);
+      assert.equal(f.command(f.host, "enqueue", youtube ?
+        { youtube: "M7lc1UVf-VE", title: "Video" } : { songId: f.song.id }).accepted, true);
+      const old = f.rooms.claim(f.room.id, f.host);
+      assert.equal(f.command(f.host, "play").accepted, true);
+      let room = f.store.get("rooms", f.room.id);
+      const playbackId = room.current.playbackId;
+      f.rooms.telemetry(room.id, f.host, {
+        leaseGeneration: old.generation, playbackId, position: 30, state: "playing",
+      });
+      // Clear even a persisted seek left by an earlier display or server version.
+      room = f.store.get("rooms", room.id);
+      room.current.seek = { position: 20, id: "old-seek" };
+      f.store.put("rooms", room.id, room);
+      assert.equal(f.rooms.claim(room.id, f.admin).pending, true);
+      f.rooms.release(room.id, old.generation, old.releaseToken);
+      assert.ok(f.rooms.claim(room.id, f.admin).generation);
+      const snapshot = f.rooms.snapshot(f.store.get("rooms", room.id), f.admin);
+      assert.equal(snapshot.current.playbackId, playbackId);
+      assert.equal(snapshot.desired, "paused");
+      assert.equal(snapshot.position, youtube ? 0 : 30);
+      if (youtube) assert.equal(snapshot.current.seek, undefined);
+      else {
+        assert.equal(snapshot.current.seek.position, 30);
+        assert.notEqual(snapshot.current.seek.id, "old-seek");
+      }
+    });
+  }
 });
 
 test("cheers are bounded, literal, shared and deduplicated for guests without playback permission", t => {

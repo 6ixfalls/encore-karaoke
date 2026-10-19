@@ -6,7 +6,9 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the trusted HTTPS origin}
-      INVIDIOUS_URL: ${INVIDIOUS_URL:-}
+      SEPARATION_DEVICE: ${SEPARATION_DEVICE:-cpu}
+      FFMPEG_VIDEO_MODE: ${FFMPEG_VIDEO_MODE:-copy}
+      FFMPEG_GPU: ${FFMPEG_GPU:-0}
       TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
     volumes:
       - encore-data:/data
@@ -16,9 +18,9 @@ services:
     tmpfs: ["/tmp:size=64m,noexec,nosuid"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    mem_limit: 512m
-    cpus: 1.5
-    pids_limit: 100
+    mem_limit: 6g
+    cpus: 4
+    pids_limit: 256
     expose: ["3000"]
   proxy:
     image: caddy:2

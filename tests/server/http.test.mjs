@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { once } from "node:events";
+import { once, EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { createServer } from "node:http";
 import { io } from "socket.io-client";
 import { Store } from "../../dist/server/store.js";
@@ -156,7 +157,13 @@ test("YouTube proxy enforces room access and forwards byte ranges and HEAD witho
   upstream.listen(0, "127.0.0.1");
   await once(upstream, "listening");
   t.after(() => { upstream.closeAllConnections(); upstream.close(); });
-  const f = await fixture(t, { invidiousUrl: `http://127.0.0.1:${upstream.address().port}` });
+  const f = await fixture(t);
+  f.server.youtube.stream = async (_id, range, signal, head) => {
+    if (range && !/^bytes=(\d*)-(\d*)$/.test(range)) return new Response(null, { status: 416 });
+    return fetch(`http://127.0.0.1:${upstream.address().port}/videoplayback`, {
+      signal, method: head ? "HEAD" : "GET", headers: range ? { Range: range } : {},
+    });
+  };
   const guest = await f.guest();
   const route = `/media/youtube/M7lc1UVf-VE?roomId=${f.room.id}`;
   assert.equal((await f.request(route)).response.status, 401);
@@ -191,6 +198,44 @@ test("vocal references are authorized sidecars, not songbook entries, and can ma
   const reference = await f.request(`/media/${result.data.referenceId}?roomId=${f.room.id}`, { session: guest });
   assert.equal(reference.data, "youtube voice");
   assert.equal(f.server.library.vocalReference("m7lc1UVf-VE"), undefined);
+});
+
+test("live separation is scoped to the active display and playback, and streams the processed mux", async t => {
+  const f = await fixture(t), guest = await f.guest(), children = [];
+  f.server.youtube.resolve = async () => ({ url: "https://rr1.googlevideo.com/video", duration: 20, userAgent: "test" });
+  f.server.separations.launch = () => {
+    const child = new EventEmitter();
+    Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      stdio: [null, null, null, new PassThrough()], kill() { this.killed = true; } });
+    children.push(child); return child;
+  };
+  f.server.rooms.command(f.room.id, f.admin, { commandId: "queue-live", type: "enqueue", payload: { youtube: "M7lc1UVf-VE", title: "Live" } });
+  f.server.rooms.claim(f.room.id, f.admin);
+  f.server.rooms.command(f.room.id, f.admin, { commandId: "play-live", type: "play" });
+  const playbackId = f.store.get("rooms", f.room.id).current.playbackId;
+  const route = `/api/rooms/${f.room.id}/separation`;
+  assert.equal((await f.request(route, { session: guest, method: "POST", body: { playbackId } })).response.status, 403);
+  assert.equal((await f.request(route, { session: f.admin, method: "POST", body: { playbackId: "old" } })).response.status, 409);
+  assert.equal(children.length, 0);
+  const result = await f.request(route, { session: f.admin, method: "POST", body: { playbackId } });
+  assert.equal(result.response.status, 201);
+  assert.equal(children.length, 3);
+  const id = result.data.id;
+  assert.equal((await f.request(`${route}/${id}`, { session: guest })).response.status, 404);
+  assert.equal((await f.request(`${route}/${id}/stop`, { session: guest, method: "POST", body: {} })).response.status, 404);
+  const progress = await f.request(`${route}/${id}`, { session: f.admin });
+  assert.equal(progress.data.complete, false);
+  assert.equal(progress.data.through, 0);
+  const head = await f.request(result.data.media, { session: f.admin, method: "HEAD" });
+  assert.equal(head.response.status, 200);
+  assert.equal(f.server.separations.jobs.get(id).claimed, false);
+  const stream = f.request(result.data.media, { session: f.admin });
+  setTimeout(() => children[2].stdout.end("processed-video"), 10);
+  const media = await stream;
+  assert.equal(media.data, "processed-video");
+  assert.equal(media.response.headers.get("accept-ranges"), "none");
+  assert.equal((await f.request(`${route}/${id}/stop`, { session: f.admin, method: "POST", body: {} })).response.status, 200);
+  assert.ok(children.every(child => child.killed));
 });
 
 test("headless HTTP serves authenticated opaque assets with ranges, validators, and safe indexing", async (t) => {

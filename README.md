@@ -2,7 +2,7 @@
 
 Self-hosted karaoke with a browser display and EnMoku phone controllers. The server runs without Electron, a desktop environment, an audio device, or external relay services. It owns rooms, library indexing, authorization, and queues; the display browser owns playback and lyric timing.
 
-The hosted path supports **local audio/video, MIDI/KAR, companion LRC and CD+G, YouTube queueing/playback, shared cheers, display microphone scoring, and local performance recording**. The [overhaul draft](docs/server-hosted-overhaul-draft.md) describes the larger roadmap. [Implementation status and remaining release gates](docs/server-hosted-implementation.md) distinguish completed code from work still required before release. Native media codecs depend on the display browser. MIDI uses a portable synthesized fallback rather than the desktop soundfont engine. Server conversion remains pending. Phone microphones use room-scoped WebRTC; device/network compatibility still requires validation. See [hosted media features](docs/hosted-media.md) for formats, Nightingale scoring, prepared vocal references, recording and YouTube setup.
+The hosted path supports **local audio/video, MIDI/KAR, companion LRC and CD+G, YouTube queueing/playback, shared cheers, display microphone scoring, and local performance recording**. The [overhaul draft](docs/server-hosted-overhaul-draft.md) describes the larger roadmap. [Implementation status and remaining release gates](docs/server-hosted-implementation.md) distinguish completed code from work still required before release. Native media codecs depend on the display browser. MIDI uses a portable synthesized fallback rather than the desktop soundfont engine. Local-file server conversion remains pending; YouTube audio is decoded and muxed for live vocal separation. Phone microphones use room-scoped WebRTC; device/network compatibility still requires validation. See [hosted media features](docs/hosted-media.md) for formats, Nightingale scoring, prepared vocal references, recording and YouTube setup.
 
 ## Run locally
 
@@ -32,12 +32,17 @@ For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_B
 | `PUBLIC_BASE_URL`               | `http://localhost:3000`; exact origin used for invitations, Origin checks, and Socket.IO |
 | `DATA_DIR`                      | `./data`; SQLite, server settings, room state, sessions, audit records                   |
 | `LIBRARY_DIR`                   | `./library`; mount read-only; filenames supply artist/title; same-stem `.lrc` companions |
-| `INVIDIOUS_URL` | Base origin of your Invidious instance (for example `https://invidious.example.com`); enables YouTube search and proxied native playback without API keys |
+| `YT_DLP_PATH` | yt-dlp executable (default `yt-dlp`); structured search and signed stream extraction |
+| `FFMPEG_PATH` | FFmpeg executable (default `ffmpeg`); live decoding and video/instrumental muxing |
+| `SEPARATION_PYTHON` | Python environment with `server/separation-requirements.txt` installed (default `python3`) |
+| `SEPARATION_DEVICE` | `cpu` by default; `cuda` or `cuda:N` for NVIDIA inference; `mps` follows Nightingale's CPU fallback |
+| `FFMPEG_VIDEO_MODE` | `copy` by default (no video transcoding); `nvidia` enables CUDA video decoding and H.264 NVENC encoding |
+| `FFMPEG_GPU` | NVIDIA video device index (default `0`), independent of the Demucs device |
 | `WEB_DIR`                       | `./dist/web`; compiled browser assets                                                    |
 | `PORT` / `LISTEN_HOST`          | `3000` / `0.0.0.0`; bind loopback when testing without a proxy                           |
 | `TRUSTED_PROXIES`               | Empty by default; comma-separated trusted reverse-proxy IPs or CIDRs; Compose trusts only its Caddy address |
 
-The web server exposes no filesystem browser, arbitrary file API, native IPC bridge, or legacy relay. It serves only the built hosted frontend and registered authorized media. Core fonts, scripts, icons, and QR generation are local. YouTube search and streaming use the configured Invidious instance through authenticated same-origin server routes. The display uses native video with Web Audio for scoring and mixed recording. Desktop presentation styles are shared with the hosted TV; native renderer services remain excluded from the hosted runtime.
+The web server exposes no filesystem browser, arbitrary file API, native IPC bridge, or legacy relay. It serves only the built hosted frontend and registered authorized media. Core fonts, scripts, icons, and QR generation are local. YouTube search and stream URL extraction use server-side yt-dlp. A bounded live worker separates vocals with the maintained adefossez/demucs fork and muxes original video with the instrumental for native playback. The display uses native video with Web Audio for scoring and mixed recording. Desktop presentation styles are shared with the hosted TV; native renderer services remain excluded from the hosted runtime.
 
 ## Development and checks
 

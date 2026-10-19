@@ -18,7 +18,7 @@ Implementation: October 19, 2026. This checkout replaces the Electron entrypoint
 | Migrations | Transactional schema initialization and version-1 to version-2 indexes; verified pre-upgrade backup; refusal of unknown future schema; older-version rollback can archive newer target data before restore |
 | Deployment | Non-root Dockerfile; Compose resource/process bounds and read-only library; Caddy internal TLS example; operator instructions for DNS, trust, renewal, quotas, backups/rollback, and lost-display retirement |
 
-Local media, rendered MIDI and native Invidious-streamed video share one Web Audio output gate. Release, disconnect and expiry stop native playback. Key login is removed; public launches issue independent owner sessions. Display microphones feed analysis and recording destinations only, never speakers. Deadlines are an additional output precaution; **deadline-based takeover is not enabled or claimed**. Takeover always needs a stopped-output acknowledgment or an administrator’s physical-retirement confirmation. Restore additionally requires isolation of every possibly outstanding display, including grants newer than the backup. This remains mandatory even if a recorded old generation acknowledges release.
+Local media, rendered MIDI and native live-separated YouTube video share one Web Audio output gate. Release, disconnect and expiry stop native playback. Key login is removed; public launches issue independent owner sessions. Display microphones feed analysis and recording destinations only, never speakers. Deadlines are an additional output precaution; **deadline-based takeover is not enabled or claimed**. Takeover always needs a stopped-output acknowledgment or an administrator’s physical-retirement confirmation. Restore additionally requires isolation of every possibly outstanding display, including grants newer than the backup. This remains mandatory even if a recorded old generation acknowledges release.
 
 ## Verification performed
 
@@ -50,7 +50,7 @@ Operator secrets are provisioned outside backups. A credential rotation changes 
 
 ### Hosted media validation added October 19
 
-Automated coverage now includes YouTube reservation admission and deduplication, score telemetry validation/fencing, bounded expiring cheers, expanded library indexing and case-insensitive companion matching, MIDI tempo/running status/lyric parsing, CD+G palette/tile rendering and backward seeking, pitch detection and guide comparison, native YouTube routing, microphone-permission cancellation, and recorder export/graph cleanup. Real microphone fidelity, long recordings, Invidious availability and native video autoplay restrictions, browser codec combinations, and physical output retirement remain device acceptance gates.
+Automated coverage now includes YouTube reservation admission and deduplication, score telemetry validation/fencing, bounded expiring cheers, expanded library indexing and case-insensitive companion matching, MIDI tempo/running status/lyric parsing, CD+G palette/tile rendering and backward seeking, pitch detection and guide comparison, native YouTube routing, microphone-permission cancellation, and recorder export/graph cleanup. Real microphone fidelity, long recordings, YouTube extraction availability and native video autoplay restrictions, browser codec combinations, and physical output retirement remain device acceptance gates.
 
 A local in-app Chromium browser additionally verified WAV/LRC playback, a KAR fixture synthesized to browser audio with embedded lyrics, CD+G companion playback, MP4 playback, room cheers, YouTube URL queueing and actual official iframe playback, pause, seek/resume, and iframe removal on display release. Fixtures and the server were temporary. The YouTube check used Google's public iframe API sample video; it does not establish availability of arbitrary videos or keyword search quota. Actual microphone permission/capture and recordings on physical hardware were not exercised by this browser check.
 
@@ -58,7 +58,7 @@ A local in-app Chromium browser additionally verified WAV/LRC playback, a KAR fi
 
 The dashboard now has only Launch karaoke (`/tv`) and Control (`/control`). Launch creates a room and a unique anonymous owner without credentials. Room codes remain stable for the room lifetime; QR links pair the controller automatically. End room creates a clean boundary between groups. Public rooms expire after 24 hours without an active TV renewing them. The browser exposes no administrator panel; administrator credentials are optional and limited to operator APIs. The TV uses the desktop presentation styles, with a separate room controller and WebRTC phone microphone transport. Build/lint/integration verification does not establish pixel-for-pixel parity with every native desktop screen or validate physical phone audio latency.
 
-The current YouTube path uses a configured Invidious instance with authenticated same-origin proxying, range requests and native recording/playback. Earlier official-iframe browser acceptance above describes the previous implementation and does not validate this new transport. A real instance and physical microphone recording still require acceptance testing.
+The current YouTube path uses yt-dlp extraction and buffered incremental separation with the maintained adefossez/demucs fork. The active display receives a sequential fragmented MP4 containing original video and the separated instrumental; streamed vocal frames supply scoring references. Earlier official-iframe browser acceptance describes the previous implementation. Hardware microphone and online YouTube availability remain acceptance gates.
 
 Nightingale scoring now replaces reference-backed sample-count scoring. The GPL
 port uses Pitchy, elapsed-time credit and singable-duration normalization, with
@@ -66,3 +66,18 @@ MIDI/vocal-WAV references, input-delay adjustment and replay protection. See
 [hosted scoring behavior](hosted-media.md) for preparation limits and the
 remaining automatic-reference/per-phone scoring scope. The build ships notices,
 the license and corresponding source with the browser application.
+
+Live separation was smoke-tested with the maintained htdemucs model on the
+repository's supplied audio fixture: an 18-second H.264/AAC output began in about
+6.5 seconds and completed processing in about 14.2 seconds on the development
+machine. This validates incremental processing and muxing for that fixture, not
+a sustained real-time performance guarantee or vocal-quality assessment. Automated
+coverage includes packet continuity, bounded input lookahead, EOF handling,
+subprocess cleanup, stale-display cancellation and room/display authorization.
+
+An additional end-to-end online smoke test used the public 19-second YouTube
+video `jNQXAC9IVRw`: yt-dlp extracted adaptive streams, the maintained Demucs
+worker generated instrumental audio and about four seconds of voiced pitch
+reference, and the resulting H.264/AAC stream began at about 6.6 seconds and
+finished processing at about 12.5 seconds. FFprobe verified both output streams.
+These are single development-machine measurements, not a performance guarantee.

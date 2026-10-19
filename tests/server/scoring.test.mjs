@@ -123,3 +123,23 @@ test("display performance tools use Nightingale scoring and retain missed-vocal 
   assert.deepEqual(tools.result(), { value: 50, samples: 80, mode: "guide" });
   assert.ok(labels.at(-1).startsWith("Nightingale pitch match"));
 });
+
+test("live references score queued microphone samples once data arrives and withhold provisional results", () => {
+  const tools = new PerformanceTools({ status() {}, score() {}, recording() {} });
+  tools.setLatency(0);
+  tools.beginLiveReference();
+  tools.pendingScores.push({ time: 0.05, hz: 440, rate: 1 }, { time: 0.1, hz: 440, rate: 1 });
+  tools.updateLiveReference({ pitches: Array(100).fill(440), step: 1024 / 44100,
+    through: 2, singable: 2, complete: false });
+  assert.equal(tools.pendingScores.length, 0);
+  assert.ok(tools.referenceScore.scorer.earned > 0);
+  assert.equal(tools.result(), undefined);
+  const earned = tools.referenceScore.scorer.earned;
+  tools.updateLiveReference({ pitches: Array(100).fill(440), step: 1024 / 44100,
+    through: 2, singable: 2, complete: true });
+  assert.equal(tools.referenceScore.scorer.earned, earned);
+  assert.throws(() => tools.updateLiveReference({ pitches: [], step: 1024 / 44100,
+    through: 1, singable: 1, complete: true }), /invalid_live_reference/);
+  tools.trackChanged();
+  assert.equal(tools.liveReference, null);
+});

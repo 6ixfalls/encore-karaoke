@@ -92,6 +92,7 @@ export class Rooms {
       revision: room.revision,
       queue: room.queue,
       current: room.current,
+      seekable: !room.current || this.store.get("songs", room.current.songId)?.format !== "youtube",
       desired: room.desired,
       observed: room.observed,
       volume: room.volume,
@@ -413,6 +414,7 @@ export class Rooms {
         break;
       case "seek":
         requireValue(room.current, "nothing_playing", 409);
+        requireValue(this.store.get("songs", room.current.songId)?.format !== "youtube", "live_separation_not_seekable", 409);
         room.current.seek = {
           position: number(p.position, 0, 86_400),
           id: randomUUID(),
@@ -536,7 +538,15 @@ export class Rooms {
       };
       room.desired = "paused";
       room.observed = "ready";
-      if (room.current) room.current.seek = { position: room.position || 0, id: randomUUID() };
+      if (room.current) {
+        if (this.store.get("songs", room.current.songId)?.format === "youtube") {
+          // A replacement display opens a new sequential separation stream.
+          room.position = 0;
+          delete room.current.seek;
+        } else {
+          room.current.seek = { position: room.position || 0, id: randomUUID() };
+        }
+      }
       room.revision++;
       this.store.put("rooms", room.id, room);
       return {

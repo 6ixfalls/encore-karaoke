@@ -20,6 +20,7 @@ export class PerformanceTools {
   resetScore() {
     this.samples = 0; this.credit = 0; this.mode = "stability"; this.previousPitch = null;
     this.referenceScore = null; this.reference = null; this.guideNotes = null;
+    this.liveReference = null; this.pendingScores = [];
   }
   setLatency(milliseconds) {
     const value = Number(milliseconds);
@@ -54,6 +55,39 @@ export class PerformanceTools {
       this.referenceScore = new ReferenceScore(this.reference);
       this.referenceScore.anchor(player.audio?.currentTime || 0);
       this.mode = "guide";
+    }
+  }
+  beginLiveReference() {
+    const reference = { duration: 0, through: 0, complete: false, pitches: [], step: 1024 / 44100 };
+    reference.at = time => {
+      const pitch = time >= 0 ? reference.pitches[Math.floor(time / reference.step)] : null;
+      return pitch == null ? [] : [pitch];
+    };
+    this.reference = this.liveReference = reference;
+    this.referenceScore = new ReferenceScore(reference);
+    this.referenceScore.anchor(0);
+    this.mode = "guide";
+    this.status("Separating streamed audio. Playback starts after the first processed chunk.");
+  }
+  updateLiveReference(snapshot) {
+    const reference = this.liveReference;
+    if (!reference) return;
+    if (!Array.isArray(snapshot.pitches) || snapshot.pitches.length > 27000 ||
+      !Number.isFinite(snapshot.through) || snapshot.through < reference.through || snapshot.through > 601 ||
+      typeof snapshot.complete !== "boolean" || !Number.isFinite(snapshot.singable) || snapshot.singable < 0 ||
+      snapshot.singable > 600 || snapshot.step !== 1024 / 44100 ||
+      snapshot.pitches.some(pitch => pitch !== null && (!Number.isFinite(pitch) || pitch < 80 || pitch > 1000)))
+      throw new Error("invalid_live_reference");
+    Object.assign(reference, { pitches: snapshot.pitches, duration: snapshot.singable, through: snapshot.through, complete: snapshot.complete });
+    this.referenceScore.scorer.totalSingable = Math.max(0.5, reference.duration);
+    this.flushLiveScores();
+    this.status(snapshot.complete ? "Vocal separation complete. Reference scoring is ready." :
+      `Separating ahead of playback: ${Math.floor(snapshot.through)} seconds ready. Score is provisional.`);
+  }
+  flushLiveScores() {
+    while (this.pendingScores.length && this.pendingScores[0].time <= this.liveReference.through) {
+      const sample = this.pendingScores.shift();
+      this.referenceScore.update(sample.time, sample.hz, this.latency, sample.rate);
     }
   }
   async startMicrophone(player) {
@@ -92,6 +126,7 @@ export class PerformanceTools {
   }
   trackChanged() { this.stopRecording(); this.resetScore(); this.score(""); }
   result() {
+    if (this.liveReference && (!this.liveReference.complete || this.liveReference.failed || this.pendingScores.length)) return undefined;
     if (this.referenceScore) return this.referenceScore.samples >= 20 ? this.referenceScore.result() : undefined;
     return this.samples >= 20 ? { value: Math.round(100 * this.credit / this.samples), samples: this.samples, mode: this.mode } : undefined;
   }
@@ -99,14 +134,23 @@ export class PerformanceTools {
     this.drawFrame?.();
     const time = player.audio.currentTime;
     if (!this.analyser || !player.valid() || player.audio.paused || player.loading || !player.loaded) {
-      this.referenceScore?.anchor(time);
+      if (!this.liveReference || !this.pendingScores.length) this.referenceScore?.anchor(time);
       this.previousPitch = null;
       return;
     }
     this.analyser.getFloatTimeDomainData(this.buffer);
     const hz = detectPitchFromSamplesMic(this.detector, this.buffer, this.context.sampleRate);
     const pitch = hz === null ? null : freqToSemitone(hz);
-    if (this.referenceScore) {
+    if (this.liveReference) {
+      if (this.pendingScores.length >= 400) {
+        this.liveReference.failed = true;
+        this.pendingScores = [];
+        this.status("Live reference delayed. A final melody score will not be published.");
+        return;
+      }
+      this.pendingScores.push({ time, hz, rate: player.audio.playbackRate });
+      this.flushLiveScores();
+    } else if (this.referenceScore) {
       this.referenceScore.update(time, hz, this.latency, player.audio.playbackRate);
     } else {
       const credit = pitch === null || this.previousPitch === null ? null : Math.max(0, 1 - Math.abs(pitch - this.previousPitch) / 2);
@@ -114,7 +158,7 @@ export class PerformanceTools {
     }
     this.previousPitch = pitch;
     const note = pitch === null ? "—" : ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "B♭", "B"][((Math.round(pitch) % 12) + 12) % 12];
-    this.score(`${this.referenceScore ? "Nightingale pitch match" : "Pitch stability"}: ${this.result()?.value ?? "…"} · ${note}`);
+    this.score(`${this.referenceScore ? "Nightingale pitch match" : "Pitch stability"}: ${(this.liveReference ? this.referenceScore.result() : this.result())?.value ?? "…"}${this.liveReference && !this.liveReference.complete ? " (provisional)" : ""} · ${note}`);
   }
 
   startRecording(player) {
