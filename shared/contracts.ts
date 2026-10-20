@@ -12,7 +12,6 @@ export const LIMITS = Object.freeze({
 });
 export const COMMANDS = new Set([
   "enqueue",
-  "cheer",
   "remove",
   "reorder",
   "play",

@@ -63,7 +63,7 @@ export class RemoteMicrophone {
     const version = this.version;
     const room = this.getRoom();
     if (!this.socket?.connected || !room?.lease || room.lease.retired || room.lease.releaseRequested)
-      throw new Error("Start karaoke on the TV before enabling your microphone.");
+      throw new Error("TV audio is not ready. Tap a TV control before enabling your microphone.");
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone access requires HTTPS and a supported browser.");
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     if (version !== this.version) { stream.getTracks().forEach((track) => track.stop()); return; }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import { VocalFrames, Separations } from "../../dist/server/separation.js";
+import { readFileSync, existsSync } from "node:fs";
 import { configuration } from "../../dist/server/config.js";
 
 export function fakeProcesses() {
@@ -145,27 +146,31 @@ test("replacing a stale running job kills its processes before admitting the nex
   assert.equal(jobs.jobs.size, 1);
 });
 
-test("a paused consumer can resume after the stall interval, but stalled inference still fails", async t => {
+test("prepared media is retained for pause and seek and removed on retirement", async t => {
+  const { children, launch } = fakeProcesses();
+  const jobs = new Separations({}, { resolve: async () => source }, launch);
+  t.after(() => jobs.close());
+  const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+  assert.equal(job.ready, false);
+  const finished = once(job.writer, "finish");
+  children[2].stdout.end("instrumental");
+  children[2].emit("close", 0);
+  await finished;
+  assert.equal(job.ready, true);
+  assert.equal(readFileSync(job.file, "utf8"), "instrumental");
+  assert.equal(await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true), job);
+  assert.equal(children.length, 3);
+  jobs.stop(job.id);
+  assert.equal(existsSync(job.directory), false);
+});
+
+test("stalled preparation still fails without an active browser consumer", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: 1000 });
   const { children, launch } = fakeProcesses();
   const jobs = new Separations({}, { resolve: async () => source }, launch);
   t.after(() => jobs.close());
   const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
-  job.claimed = true;
-  children[2].stdout.write(Buffer.alloc(512 * 1024));
-  assert.equal(job.output.writableNeedDrain, true);
-  t.mock.timers.setTime(301000);
-  jobs.sweep();
-  assert.notEqual(job.state, "failed");
-  assert.ok(children.every(child => !child.killed));
-
-  t.mock.timers.setTime(601000);
-  const drained = once(job.output, "drain");
-  job.output.resume();
-  await drained;
-  jobs.sweep();
-  assert.notEqual(job.state, "failed");
-  t.mock.timers.setTime(721001);
+  t.mock.timers.setTime(121001);
   jobs.sweep();
   assert.equal(job.error, "separation_stalled");
   assert.ok(children.every(child => child.killed));

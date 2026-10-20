@@ -139,3 +139,26 @@ test("ending and locking invalidate joins while guests cannot access other rooms
   assert.throws(f.guest, /room_locked/);
   assert.equal(f.participants.session("not-a-token"), null);
 });
+
+test("seek preserves pause state and playback identity, and reclaim restores the saved position", t => {
+  const f = fixture(t);
+  const grant = f.rooms.claim(f.room.id, f.host);
+  f.enqueue();
+  f.command(f.host, "play");
+  const playbackId = f.state().current.playbackId;
+  f.command(f.host, "pause");
+  assert.equal(f.command(f.host, "seek", { position: 42.25 }).accepted, true);
+  assert.equal(f.state().position, 42.25);
+  assert.equal(f.state().desired, "paused");
+  assert.equal(f.state().current.playbackId, playbackId);
+  assert.equal(f.state().current.seek.position, 42.25);
+  const seekId = f.state().current.seek.id;
+  f.command(f.host, "play");
+  assert.equal(f.state().current.seek.id, seekId);
+  assert.equal(f.command(f.host, "seek", { position: 601 }).accepted, false);
+  f.rooms.release(f.room.id, f.host, grant.generation);
+  f.rooms.claim(f.room.id, f.host);
+  assert.equal(f.state().position, 42.25);
+  assert.equal(f.state().current.seek.position, 42.25);
+  assert.notEqual(f.state().current.seek.id, seekId);
+});

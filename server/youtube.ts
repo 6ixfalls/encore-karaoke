@@ -21,6 +21,13 @@ export const runJson: JsonRunner = (binary, args, signal) => new Promise((resolv
 });
 
 export interface VideoSource { url: string; audioUrl?: string; duration: number; userAgent: string }
+interface MusicMetadata { id: string; title?: string; track?: string; artist?: string; artists?: string[]; channel?: string; duration?: number }
+function song(item: MusicMetadata) {
+  const title = item.track || item.title;
+  requireValue(typeof title === "string" && title.trim(), "youtube_invalid_response", 502);
+  return { videoId: item.id, title: title.slice(0, 200), artist: (item.artists?.join(", ") || item.artist || item.channel || "YouTube Music").slice(0, 200),
+    ...(Number.isFinite(item.duration) && item.duration! > 0 ? { duration: item.duration } : {}) };
+}
 export class YouTube {
   private active = 0;
   private cache = new Map<string, { source: VideoSource; expires: number }>();
@@ -32,12 +39,18 @@ export class YouTube {
     finally { this.active--; }
   }
   async search(query: string) {
-    const data = await this.json(["--flat-playlist", "--dump-single-json", "--skip-download", "--", `ytsearch12:${query}`]) as {
-      entries?: { id: string; title: string; channel?: string }[];
+    const data = await this.json(["--flat-playlist", "--playlist-end", "12", "--dump-single-json", "--skip-download", "--", `https://music.youtube.com/search?q=${encodeURIComponent(query)}#songs`]) as {
+      entries?: MusicMetadata[];
     };
     requireValue(Array.isArray(data?.entries), "youtube_invalid_response", 502);
     return data.entries.filter(item => item && /^[\w-]{11}$/.test(item.id) && typeof item.title === "string")
-      .slice(0, 12).map(item => ({ videoId: item.id, title: item.title, artist: item.channel || "YouTube" }));
+      .slice(0, 12).map(song);
+  }
+  async metadata(id: string) {
+    requireValue(/^[\w-]{11}$/.test(id), "invalid_youtube_id");
+    const data = await this.json(["--dump-single-json", "--skip-download", "--", `https://music.youtube.com/watch?v=${id}`]) as MusicMetadata;
+    requireValue(data && data.id === id, "youtube_invalid_response", 502);
+    return song(data);
   }
   validate(url: URL) {
     requireValue(url.protocol === "https:" && !url.username && !url.password && !url.port &&

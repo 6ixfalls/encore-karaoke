@@ -16,6 +16,7 @@ import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
 import { YouTube } from "./youtube.js";
 import { Separations } from "./separation.js";
+import { Lyrics } from "./lyrics.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
@@ -32,7 +33,7 @@ export function createApplication(store: Store, config: Configuration) {
     return req.session;
   };
   const youtube = new YouTube(config.ytDlp);
-  const separations = new Separations(config, youtube);
+  const separations = new Separations(config, youtube, undefined, new Lyrics());
   let transfers = 0;
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustedProxies?.length ? config.trustedProxies : false);
@@ -168,7 +169,21 @@ export function createApplication(store: Store, config: Configuration) {
     rooms.room(String(req.query.roomId || ""), participant(req));
     participants.throttle(`youtube:${participant(req).id}`, 10);
     participants.throttle("youtube:global", 100);
-    res.json({ items: await youtube.search(text(req.query.q, 200)) });
+    const items = await youtube.search(text(req.query.q, 200));
+    for (const item of items) store.put("songs", `yt:${item.videoId}`, {
+      id: `yt:${item.videoId}`, format: "youtube", ...item, metadataExpires: Date.now() + 10 * 60_000,
+    });
+    res.json({ items });
+  });
+  app.get("/api/youtube/:id/metadata", async (req, res) => {
+    rooms.room(String(req.query.roomId || ""), participant(req));
+    participants.throttle(`youtube:${participant(req).id}`, 10);
+    participants.throttle("youtube:global", 100);
+    const item = await youtube.metadata(req.params.id);
+    store.put("songs", `yt:${item.videoId}`, {
+      id: `yt:${item.videoId}`, format: "youtube", ...item, metadataExpires: Date.now() + 10 * 60_000,
+    });
+    res.json(item);
   });
   app.post("/api/rooms/:roomId/separation", async (req, res) => {
     const session = participant(req), room = rooms.room(req.params.roomId, session);
@@ -184,13 +199,14 @@ export function createApplication(store: Store, config: Configuration) {
         active.lease?.deviceId === session.id && !active.lease?.releaseRequested && rooms.available(active);
     };
     const job = await separations.create(room.id, playbackId, session.id, song.videoId, current);
-    res.status(201).json({ id: job.id, media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
+    res.status(201).json({ id: job.id, ready: job.ready, media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
   });
   app.get("/api/rooms/:roomId/separation/:id", (req, res) => {
     const session = participant(req);
     rooms.room(req.params.roomId, session);
     const job = separations.get(req.params.id, req.params.roomId, session.id);
-    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete });
+    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete, ready: job.ready,
+      lyrics: job.lyrics, lyricsPending: job.lyrics === undefined });
   });
   app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {
     separations.stopOwned(req.params.id, req.params.roomId, participant(req).id);
@@ -199,20 +215,19 @@ export function createApplication(store: Store, config: Configuration) {
   app.head("/media/separation/:id", (req, res) => {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
-    separations.get(req.params.id, roomId, session.id);
-    res.set({ "Content-Type": "video/mp4", "Cache-Control": "no-store", "Accept-Ranges": "none" }).end();
+    const job = separations.get(req.params.id, roomId, session.id);
+    requireValue(job.ready, "media_preparing", 409);
+    res.set("Cache-Control", "no-store").sendFile(job.file);
   });
   app.get("/media/separation/:id", (req, res) => {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
     const job = separations.get(req.params.id, roomId, session.id);
-    requireValue(!job.claimed, "separation_stream_already_open", 409);
+    requireValue(job.ready, "media_preparing", 409);
     requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
     job.claimed = true; transfers++;
-    res.set({ "Content-Type": "video/mp4", "Cache-Control": "no-store", "Accept-Ranges": "none" });
-    res.once("close", () => { transfers--; if (!res.writableFinished) separations.stop(job.id); });
-    job.output.on("error", () => res.destroy());
-    job.output.pipe(res);
+    res.once("close", () => { transfers--; });
+    res.set("Cache-Control", "no-store").sendFile(job.file);
   });
   app.get("/media/youtube/:id", async (req, res) => {
     const session = participant(req);
@@ -446,7 +461,7 @@ export function createApplication(store: Store, config: Configuration) {
       for (const item of room.queue) referencedSongs.add(item.songId);
     }
     for (const song of store.all("songs"))
-      if (!referencedSongs.has(song.id)) store.delete("songs", song.id);
+      if (!referencedSongs.has(song.id) && (song.metadataExpires ?? 0) <= now) store.delete("songs", song.id);
   }, 1000);
   sweep.unref();
   return {

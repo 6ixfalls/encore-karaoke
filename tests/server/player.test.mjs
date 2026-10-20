@@ -572,3 +572,76 @@ test("YouTube finalization retires progress polls before accepting the final ref
     });
   }
 });
+
+test("tab hiding does not stop playback; pause, seek and resume retain the loaded media", async t => {
+  const { player, room, calls, rendered } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, current: { playbackId: "track" }, desired: "playing" };
+  await player.update(playing);
+  player.audio.currentTime = 42.25;
+  document.hidden = true;
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("blur"));
+  assert.equal(player.audio.paused, false);
+  assert.equal(player.generation, "generation-1");
+  await player.update({ ...playing, desired: "paused" });
+  assert.equal(player.audio.currentTime, 42.25);
+  const seek = { ...playing, desired: "paused", current: { playbackId: "track", seek: { id: "seek-1", position: 12.5 } } };
+  await player.update(seek);
+  assert.equal(player.audio.currentTime, 12.5);
+  assert.equal(player.audio.paused, true);
+  player.lines = [{ time: 12, end: 13, text: "First" }, { time: 14, end: 15, text: "Next" }];
+  player.renderLyrics();
+  assert.deepEqual(rendered.at(-1), ["First", "Next"]);
+  player.audio.currentTime = 13.5;
+  player.renderLyrics();
+  assert.deepEqual(rendered.at(-1), ["", "Next"]);
+  await player.update({ ...seek, desired: "playing" });
+  assert.equal(player.audio.currentTime, 13.5);
+  assert.equal(player.audio.paused, false);
+  assert.equal(calls.filter(([url, options]) => url.endsWith("/separation") && options?.method === "POST").length, 1);
+});
+
+test("reconnecting within the same lease reapplies the seek to reloaded media", async t => {
+  const { player, room, calls } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const snapshot = { ...room, desired: "playing", current: {
+    playbackId: "track", seek: { id: "seek-1", position: 42.25 },
+  } };
+  await player.update(snapshot);
+  assert.equal(player.audio.currentTime, 42.25);
+
+  player.disconnected();
+  assert.equal(player.audio.currentTime, 0);
+  player.connected = true;
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  await player.update(snapshot);
+
+  assert.equal(player.audio.currentTime, 42.25);
+  assert.equal(player.audio.paused, false);
+  assert.equal(calls.filter(([url, options]) => url.endsWith("/separation") && options?.method === "POST").length, 2);
+});
+
+test("preparation honors a pause and seek issued before media becomes ready", async t => {
+  const { player, room, service } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  service.request = async (_url, options) => options?.method === "POST"
+    ? { id: "job", media: "/prepared", ready: false }
+    : { ready: false, complete: false };
+  const playing = { ...room, current: { playbackId: "track" }, desired: "playing" };
+  await player.update(playing);
+  assert.equal(player.loading, true);
+  assert.equal(player.audio.playCount, 0);
+  await player.update({ ...playing, desired: "paused", current: { playbackId: "track", seek: { id: "seek", position: 15 } } });
+  clearTimeout(player.separationTimer);
+  service.request = async () => ({ ready: true, complete: true, lyrics: { lines: [{ time: 15, end: 16, text: "Line" }] } });
+  await player.pollSeparation(player.loadingVersion, "track");
+  assert.equal(player.audio.src, "/prepared");
+  assert.equal(player.audio.currentTime, 15);
+  assert.equal(player.audio.paused, true);
+  assert.equal(player.loading, false);
+  assert.equal(player.lines[0].text, "Line");
+});

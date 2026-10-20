@@ -91,6 +91,11 @@ h3 {
 .columns > .card {
   margin-bottom: 0;
 }
+.columns:has(> .card:only-child) { grid-template-columns: 1fr; }
+#seek-form { flex-wrap: nowrap; }
+#seek-form label { flex: 1; }
+#seek { width: 100%; max-width: none; min-width: 100px; }
+#time-position { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 14px; }
 .columns {
   margin-bottom: 24px;
 }
@@ -198,6 +203,7 @@ footer,
   min-height: 1.4em;
   color: var(--muted);
 }
+#lyrics:empty, #next-lyrics:empty { display: none; }
 .stage .controls {
   justify-content: center;
 }
@@ -347,8 +353,6 @@ footer {
 #local-media, #cdg-player { width: 100%; max-width: 960px; margin: 1rem auto; }
 #local-media, #cdg-player { max-height: 60vh; object-fit: contain; }
 #cdg-player { image-rendering: pixelated; }
-#cheers { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
-.cheer { border-radius: 1rem; background: #4a296c; padding: .6rem 1rem; overflow-wrap: anywhere; }
 #recordings a, #scores span { display: block; margin: .6rem 0; }
 #performance-status, #score { color: #ffce73; }
 

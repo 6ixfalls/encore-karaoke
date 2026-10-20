@@ -17,6 +17,7 @@ const remoteMicrophone = new RemoteMicrophone({ tv, status: (message) => { $("re
 let session,
   room,
   socket;
+let endingRoom = false;
 let invitation = new URLSearchParams(location.hash.slice(1)).get("invite");
 // Erase secrets before any API request, Socket.IO connection, or navigation.
 if (location.hash)
@@ -82,11 +83,7 @@ const player = new BrowserPlayer(services, {
   error: showError,
   released: () => {
     remoteMicrophone.stop();
-    $("start-display").hidden = !tv;
-    $("stop-display").hidden = true;
-    tell(
-      "Karaoke paused. Start this screen again to continue.",
-    );
+    if (room?.status !== "ended") setTimeout(() => startDisplay().catch(showError), 0);
   },
 });
 async function command(type, payload = {}, revision) {
@@ -103,7 +100,6 @@ function membershipEnded() {
   session = null;
   socket?.disconnect();
   player.stop().catch(showError);
-  $("logout").hidden = true;
   if (!tv) {
     $("room").hidden = true;
     $("welcome").hidden = false;
@@ -176,7 +172,6 @@ async function enter(id) {
 }
 async function lobby() {
   session = await services.request("/api/session");
-  $("logout").hidden = false;
   $("welcome").hidden = true;
   $("lobby").hidden = !!invitation;
   $("room").hidden = true;
@@ -190,6 +185,9 @@ async function lobby() {
     else { $("welcome").hidden = false; $("lobby").hidden = true; }
   }
 }
+function formatTime(seconds) {
+  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+}
 function render(snapshot) {
   if (room?.id === snapshot.id && snapshot.revision < room.revision) return;
   room = snapshot;
@@ -198,22 +196,20 @@ function render(snapshot) {
     room.current?.title || (tv ? "ENCORE KARAOKE" : "Waiting for your first song");
   $("now-artist").textContent = room.current?.artist || "";
   $("playback-status").textContent =
-    `${room.status} · ${room.observed} · ${room.desired}`;
+    room.observed === "loading" ? "Preparing instrumental…" : room.current ? room.observed : "Ready to sing";
   $("progress").textContent = room.current
     ? `Approximately ${Math.floor(room.position || 0)} seconds · ${room.tempo.toFixed(2)}×`
     : "";
   $("display-controls").hidden = !tv || !isHost();
   $("play-controls").hidden = !room.canControl;
   $("seek-form").hidden = !room.canControl || room.seekable === false;
+  const duration = room.duration || 600;
+  $("seek").max = String(duration);
+  if (document.activeElement !== $("seek")) $("seek").value = String(room.position || 0);
+  $("time-position").textContent = `${formatTime(room.position || 0)} / ${room.duration ? formatTime(duration) : "–:––"}`;
+  $("play").disabled = !room.current && !room.queue.length;
+  $("pause").disabled = room.desired !== "playing";
   $("host-tools").hidden = !isHost();
-  $("cheers").replaceChildren(...(room.cheers || []).map((cheer) => {
-    const node = label(`${cheer.nickname}: ${cheer.message}`, "cheer");
-    setTimeout(() => node.remove(), 8000);
-    return node;
-  }));
-  $("scores").replaceChildren(...(room.scores || []).slice().reverse().map((score) =>
-    label(`${score.nickname} · ${score.title} · ${score.value} (${score.mode === "guide" ? "guide match" : "pitch stability"})`)));
-
   $("room-cap-label").hidden = !isHost();
   $("lock").textContent =
     room.status === "locked" ? "Unlock room" : "Lock room";
@@ -226,48 +222,9 @@ function render(snapshot) {
     if (document.activeElement !== $(id)) $(id).value = String(value);
   if (document.activeElement !== $("guest-control"))
     $("guest-control").checked = room.policy.guestControl;
-  $("queue").replaceChildren(
-    ...room.queue.map((q, index) => {
-      const li = document.createElement("li");
-      li.className = "queue-item";
-      const row = document.createElement("div"),
-        info = document.createElement("div");
-      info.className = "info";
-      info.append(label(q.title), label(`${q.artist || ""} · ${q.nickname}`));
-      row.append(info);
-      if (isHost() && index > 0)
-        row.append(
-          button("↑", () => {
-            const ids = room.queue.map((item) => item.id),
-              i = ids.indexOf(q.id);
-            [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]];
-            return command("reorder", { ids }, room.revision);
-          }),
-        );
-      if (isHost() || q.owner === session.id)
-        row.append(
-          button("Remove", () =>
-            command("remove", { id: q.id }, room.revision),
-          ),
-        );
-      li.append(row);
-      return li;
-    }),
-  );
-  $("participants").replaceChildren(
-    ...room.participants.map((p) => {
-      const row = document.createElement("div");
-      row.className = "participant";
-      row.append(label(`${p.nickname} · ${p.role}`, "info"));
-      if (isHost() && p.role === "guest")
-        row.append(
-          button("Remove device", () => command("revoke", { deviceId: p.id })),
-        );
-      return row;
-    }),
-  );
   player.update(room).catch(showError);
   renderTV?.(room);
+  if (tv) startDisplay().catch(showError);
   remoteMicrophone.update();
   if (room.status === "ended") membershipEnded();
 }
@@ -280,48 +237,17 @@ $("join-form").addEventListener(
     });
     $("join-code").value = "";
     session = await services.request("/api/session");
-    $("logout").hidden = false;
     connect();
     await enter(joined.roomId);
     tell("");
   }),
 );
-$("logout").addEventListener(
-  "click",
-  run(async () => {
-    try {
-      await player.stop();
-      if (session) {
-        if (isHost()) await command("end");
-        else await services.request("/api/logout", { method: "POST", body: {} });
-      }
-    } finally {
-      services.clear();
-      location.assign("/");
-    }
-  }),
-);
-$("choose-room").addEventListener("click", run(async () => {
-  await player.stop();
-  remoteMicrophone.stop();
-  socket?.disconnect();
-  room = null;
-  invitation = null;
-  $("join-code").value = "";
-  $("room").hidden = true;
-  $("lobby").hidden = true;
-  $("welcome").hidden = false;
-  $("join-code").focus();
-}));
-$("cheer-form").addEventListener("submit", run(async () => {
-  await command("cheer", { message: $("cheer-message").value });
-  $("cheer-message").value = "";
-}));
 $("youtube-form").addEventListener("submit", run(async () => {
   const query = $("youtube-query").value.trim(), id = youtubeId(query);
   if (id) {
-    await command("enqueue", { youtube: id, title: $("youtube-title").value.trim() || `YouTube · ${id}` });
-    tell("YouTube video queued.");
+    const track = await services.request(`/api/youtube/${id}/metadata?roomId=${room.id}`);
+    await command("enqueue", { youtube: id, title: track.title, artist: track.artist });
+    tell("Song queued.");
     return;
   }
   const roomId = room.id;
@@ -329,7 +255,7 @@ $("youtube-form").addEventListener("submit", run(async () => {
   if (room.id !== roomId) return;
   $("youtube-results").replaceChildren(...response.items.map((video) => {
     const row = document.createElement("div"); row.className = "song";
-    row.append(label(`${video.title} · ${video.artist}`), button("Queue +", () => command("enqueue", { youtube: video.videoId, title: video.title })));
+    row.append(label(`${video.title} · ${video.artist}`), button("Queue +", () => command("enqueue", { youtube: video.videoId, title: video.title, artist: video.artist })));
     return row;
   }));
 }));
@@ -357,6 +283,7 @@ for (const action of ["play", "pause", "skip"])
     run(() => command(action)),
   );
 $("end").addEventListener("click", run(async () => {
+  endingRoom = true;
   await player.stop();
   await command("end");
   location.assign("/");
@@ -370,6 +297,7 @@ for (const action of ["volume", "tempo"])
     "change",
     run(() => command(action, { value: Number($(action).value) })),
   );
+$("seek").addEventListener("change", run(() => command("seek", { position: Number($("seek").value) })));
 $("seek-form").addEventListener(
   "submit",
   run(() => command("seek", { position: Number($("seek").value) })),
@@ -384,15 +312,21 @@ $("policy-form").addEventListener(
     }),
   ),
 );
-async function startDisplay() {
-  if (!socket?.connected) throw new Error("server_connection_required");
+let displayStarting;
+function startDisplay() {
+  if (endingRoom || !tv || !isHost() || !room || room.status === "ended" || !socket?.connected || player.generation || player.stopping)
+    return Promise.resolve();
+  if (displayStarting) return displayStarting;
   player.connected = true;
-  await player.claim(room.id);
-  $("start-display").hidden = true;
-  $("stop-display").hidden = false;
-  tell("");
+  displayStarting = player.claim(room.id).then(() => tell("")).finally(() => { displayStarting = null; });
+  return displayStarting;
 }
-$("start-display").addEventListener("click", run(startDisplay));
+// Browser autoplay policies can suspend audio on a direct visit or reload.
+// Reuse any normal interaction to unlock it, without a separate start screen.
+for (const event of ["pointerdown", "keydown"])
+  document.addEventListener(event, () => {
+    if (tv && player.context?.state !== "running") player.initialize().then(startDisplay).catch(showError);
+  }, { capture: true });
 function connected() {
   if (socket?.connected) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -418,7 +352,6 @@ if (dashboard) {
     dashboard.hidden = true;
     document.body.className = "tv";
     $("welcome").hidden = true;
-    $("start-display").hidden = true;
     renderTV = mountTV();
     history.pushState(null, "", "/tv");
     const audioReady = player.initialize();
@@ -432,10 +365,6 @@ if (dashboard) {
   });
   window.addEventListener("popstate", () => location.reload());
 }
-$("stop-display").addEventListener(
-  "click",
-  run(() => player.stop()),
-);
 $("fullscreen").addEventListener(
   "click",
   run(() => document.documentElement.requestFullscreen?.()),
@@ -487,7 +416,6 @@ async function boot() {
   } else if (tv) {
     const launched = await services.request("/api/launch", { method: "POST", body: {} });
     session = await services.request("/api/session");
-    $("logout").hidden = false;
     connect();
     await enter(launched.roomId);
   } else await lobby();

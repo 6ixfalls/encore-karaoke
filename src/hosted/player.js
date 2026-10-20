@@ -18,10 +18,6 @@ export class BrowserPlayer {
         this.report(this.audio.paused ? "paused" : this.mediaState);
     }, 1000);
     window.addEventListener("pagehide", () => this.stop().catch(() => {}));
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.generation)
-        this.stop().catch((error) => this.error(error));
-    });
   }
   bindMedia(media) {
     for (const [event, state] of Object.entries({
@@ -47,6 +43,8 @@ export class BrowserPlayer {
     }
   }
   clearMedia() {
+    this.seekId = null;
+    this.pendingSeek = null;
     const separation = this.separation;
     this.separation = null;
     clearTimeout(this.separationTimer);
@@ -240,6 +238,7 @@ export class BrowserPlayer {
       this.loaded = playbackId;
       this.lines = [];
       this.clearMedia();
+      this.report("loading", playbackId);
       try {
         const separated = await this.services.request(`/api/rooms/${room.id}/separation`,
           { method: "POST", body: { playbackId } });
@@ -248,10 +247,16 @@ export class BrowserPlayer {
           return;
         }
         this.separation = { id: separated.id, roomId: room.id };
+        if (separated.ready === false) {
+          this.separation.media = separated.media;
+          this.pollSeparation(version, playbackId);
+          return;
+        }
         this.audio.src = separated.media;
         this.audio.hidden = false;
         this.song = { format: "youtube" };
         this.performanceTools?.beginLiveReference?.();
+        this.lines = separated.lyrics?.lines || [];
         this.pollSeparation(version, playbackId);
         this.loading = false;
         this.mediaState = "ready";
@@ -271,9 +276,20 @@ export class BrowserPlayer {
       return;
     const current = this.room.current;
     this.audio.playbackRate = this.room.tempo;
-    if (current.seek && this.seekId !== current.seek.id) {
-      this.audio.currentTime = current.seek.position;
-      this.seekId = current.seek.id;
+    const seek = current.seek;
+    if (seek && this.seekId !== seek.id) {
+      // Some browsers reject a seek until the new media has metadata.
+      if (this.audio.readyState === 0) {
+        if (this.pendingSeek !== seek.id) {
+          this.pendingSeek = seek.id;
+          this.audio.addEventListener("loadedmetadata", () => {
+            if (this.loaded === playbackId) this.update(this.room).catch(this.error);
+          }, { once: true });
+        }
+      } else {
+        this.audio.currentTime = seek.position;
+        this.seekId = seek.id;
+      }
     }
     if (this.room.desired === "playing") {
       if (this.audio.paused && !this.audio.ended) {
@@ -301,7 +317,20 @@ export class BrowserPlayer {
       const snapshot = await this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`);
       if (this.separation !== job || job.finishing || version !== this.loadingVersion || !this.valid()) return;
       this.performanceTools?.updateLiveReference?.(snapshot);
-      if (!snapshot.complete) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
+      if (snapshot.lyrics) this.lines = snapshot.lyrics.lines;
+      if (this.loading && snapshot.ready) {
+        this.audio.src = job.media;
+        this.audio.hidden = false;
+        this.song = { format: "youtube" };
+        this.lines = snapshot.lyrics?.lines || [];
+        this.performanceTools?.beginLiveReference?.();
+        this.performanceTools?.updateLiveReference?.(snapshot);
+        this.loading = false;
+        this.mediaState = "ready";
+        this.failedPlaybackId = null;
+        await this.update(this.room);
+      }
+      if (!snapshot.complete || this.loading || snapshot.lyricsPending) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
     } catch (error) {
       if (this.separation === job && !job.finishing && version === this.loadingVersion) this.failPlayback(error, playbackId);
     }
@@ -323,7 +352,7 @@ export class BrowserPlayer {
       (line) => line.time <= position,
     );
     this.lyrics(
-      index < 0 ? "♪" : this.lines[index].text,
+      index < 0 ? "" : position >= (this.lines[index].end ?? Infinity) ? "" : this.lines[index].text,
       this.lines?.[index + 1]?.text || "",
     );
   }

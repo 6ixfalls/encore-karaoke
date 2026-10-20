@@ -1,11 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { PassThrough, type Readable, type Writable } from "node:stream";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, openSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PitchDetector } from "pitchy";
 import type { Configuration } from "./config.js";
 import type { VideoSource, YouTube } from "./youtube.js";
 import { requireValue, Fault } from "../shared/contracts.js";
+import { Lyrics, type TimedLyrics } from "./lyrics.js";
 
 const RATE = 44100, WINDOW = 2048, HOP = 1024;
 export class VocalFrames {
@@ -48,12 +52,15 @@ export interface SeparationJob {
   current: () => boolean; output: PassThrough; processes: ChildProcess[];
   controller: AbortController; frames: VocalFrames; state: "loading" | "processing" | "complete" | "failed";
   error?: string; claimed: boolean; started: number; progress: number; referenceComplete: boolean;
+  directory: string; file: string; writer: WriteStream; ready: boolean;
+  lyrics?: TimedLyrics | null;
 }
 export type Launcher = (command: string, args: string[], options: Parameters<typeof spawn>[2]) => ChildProcess;
 
 export class Separations {
   jobs = new Map<string, SeparationJob>();
-  constructor(private config: Configuration, private youtube: Pick<YouTube, "resolve">, private launch: Launcher = spawn) {}
+  constructor(private config: Configuration, private youtube: Pick<YouTube, "resolve">, private launch: Launcher = spawn,
+    private lyrics?: Lyrics) {}
   async create(roomId: string, playbackId: string, deviceId: string, videoId: string, current: () => boolean) {
     for (const job of this.jobs.values()) {
       if (!job.current()) this.stop(job.id);
@@ -62,14 +69,30 @@ export class Separations {
     if (existing && existing.current() && existing.state !== "failed") return existing;
     if (existing) this.stop(existing.id);
     requireValue(this.jobs.size < (this.config.maxSeparations || 1), "separation_busy", 503);
+    const directory = mkdtempSync(join(tmpdir(), "encore-media-"));
+    const file = join(directory, "backing.mp4");
+    const writer = createWriteStream(file, { fd: openSync(file, "wx", 0o600) });
     const job: SeparationJob = { id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
       processes: [], controller: new AbortController(), frames: new VocalFrames(), state: "loading", claimed: false,
+      directory, file, writer, ready: false,
       started: Date.now(), progress: Date.now(), referenceComplete: false };
     job.output.on("error", () => {});
+    // Retain the prepared instrumental for repeatable HTTP range requests.
+    // Pausing or seeking no longer tears down the separation process.
+    let bytes = 0;
+    job.output.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      job.progress = Date.now();
+      if (bytes > 1024 * 1024 * 1024) this.fail(job, "separation_media_limit");
+    });
+    writer.on("error", () => this.fail(job, "separation_storage_failed"));
+    writer.on("finish", () => { job.ready = job.state === "complete"; });
+    job.output.pipe(writer);
     // A full output pipe can intentionally suspend the entire processing chain.
     // Give inference a fresh stall interval when the consumer resumes reading.
     job.output.on("drain", () => { job.progress = Date.now(); });
     this.jobs.set(job.id, job);
+    if (this.lyrics) void this.lyrics.get(videoId, job.controller.signal).then(result => { job.lyrics = result; });
     try {
       const source = await this.youtube.resolve(videoId, job.controller.signal);
       requireValue(current() && this.jobs.has(job.id), "stale_display", 409);
@@ -126,7 +149,10 @@ export class Separations {
       if (code === 0 && pending.length === 0 && job.frames.samples > 0) job.referenceComplete = true;
     });
     mux.on("close", code => {
-      if (code === 0 && job.state !== "failed") job.state = "complete";
+      if (code === 0 && job.state !== "failed") {
+        job.state = "complete";
+        job.ready = job.writer.writableFinished;
+      }
     });
   }
   get(id: string, roomId: string, deviceId: string) {
@@ -142,6 +168,8 @@ export class Separations {
     job.controller.abort();
     job.processes.forEach(child => child.kill("SIGKILL"));
     job.output.destroy(new Fault(error, 502));
+    job.writer.destroy();
+    rmSync(job.directory, { recursive: true, force: true });
   }
   stopOwned(id: string, roomId: string, deviceId: string) {
     const job = this.jobs.get(id);
@@ -153,6 +181,8 @@ export class Separations {
     if (!job) return;
     this.jobs.delete(id); job.controller.abort();
     job.processes.forEach(child => child.kill("SIGKILL")); job.output.destroy();
+    job.writer.destroy();
+    rmSync(job.directory, { recursive: true, force: true });
   }
   sweep() {
     const now = Date.now();

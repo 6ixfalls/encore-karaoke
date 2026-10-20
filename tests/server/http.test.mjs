@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { io } from "socket.io-client";
 import { PassThrough } from "node:stream";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Store } from "../../dist/server/store.js";
 import { createApplication } from "../../dist/server/app.js";
 import { configuration } from "../../dist/server/config.js";
@@ -107,6 +110,28 @@ test("end invalidates the code, disconnects controllers and a new launch creates
   assert.notEqual(next.data.roomId, f.tv.roomId);
 });
 
+test("search metadata survives sweeps until selection and expires when unused", async t => {
+  const f = await fixture(t), guest = await f.join();
+  const videoId = "M7lc1UVf-VE", unusedId = "abcdefghijk";
+  f.server.youtube.search = async () => [{ videoId, title: "Song", artist: "Artist", duration: 195 }];
+  f.server.youtube.metadata = async () => ({ videoId: unusedId, title: "Unused", artist: "Artist", duration: 120 });
+  await f.request(`/api/youtube/search?roomId=${f.tv.roomId}&q=Song`, { token: guest.token });
+  await f.request(`/api/youtube/${unusedId}/metadata?roomId=${f.tv.roomId}`, { token: guest.token });
+  const expired = f.store.get("songs", `yt:${unusedId}`);
+  f.store.put("songs", expired.id, { ...expired, metadataExpires: Date.now() - 1 });
+  // Let the application's one-second cleanup run before selecting a result.
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(f.store.get("songs", `yt:${unusedId}`), undefined);
+  assert.equal(f.store.get("songs", `yt:${videoId}`).duration, 195);
+  await f.request(`/api/rooms/${f.tv.roomId}/display/claim`, { token: f.tv.token, method: "POST", body: {} });
+  await f.command(guest, "enqueue", { youtube: videoId, title: "Song", artist: "Artist" });
+  await f.command(guest, "play");
+  const snapshot = await f.request(`/api/rooms/${f.tv.roomId}`, { token: guest.token });
+  assert.equal(snapshot.data.duration, 195);
+  assert.equal((await f.command(guest, "seek", { position: 196 })).data.accepted, false);
+  assert.equal(f.store.get("songs", `yt:${videoId}`).metadataExpires, undefined);
+});
+
 test("YouTube search uses yt-dlp and separation streams belong exclusively to the main screen", async t => {
   const f = await fixture(t), guest = await f.join();
   f.server.youtube.search = async q => [{ videoId: "M7lc1UVf-VE", title: q, artist: "YouTube" }];
@@ -119,8 +144,10 @@ test("YouTube search uses yt-dlp and separation streams belong exclusively to th
   const route = `/api/rooms/${f.tv.roomId}/separation`;
   assert.equal((await f.request(route, { token: guest.token, method: "POST", body: { playbackId } })).status, 403);
   f.server.separations.create = async (roomId, track, deviceId, _videoId, current) => {
-    const output = new PassThrough(); output.end("instrumental");
-    const job = { id: "job", roomId, playbackId: track, deviceId, current, output, controller: new AbortController(), processes: [], claimed: false, state: "processing", frames: { snapshot: () => ({ pitches: [], through: 0 }) } };
+    const output = new PassThrough();
+    const directory = mkdtempSync(join(tmpdir(), "encore-test-")), file = join(directory, "backing.mp4");
+    writeFileSync(file, "instrumental");
+    const job = { id: "job", directory, file, writer: output, ready: true, roomId, playbackId: track, deviceId, current, output, controller: new AbortController(), processes: [], claimed: false, state: "processing", frames: { snapshot: () => ({ pitches: [], through: 0 }) } };
     f.server.separations.jobs.set(job.id, job); return job;
   };
   const job = await f.request(route, { token: f.tv.token, method: "POST", body: { playbackId } });
@@ -132,4 +159,11 @@ test("YouTube search uses yt-dlp and separation streams belong exclusively to th
   const response = await fetch(url);
   assert.equal(response.headers.get("content-type"), "video/mp4");
   assert.equal(await response.text(), "instrumental");
+  const partial = await fetch(url, { headers: { Range: "bytes=2-5" } });
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get("accept-ranges"), "bytes");
+  assert.equal(partial.headers.get("content-range"), "bytes 2-5/12");
+  assert.equal(await partial.text(), "stru");
+  assert.equal((await fetch(url, { method: "HEAD" })).headers.get("content-length"), "12");
+  assert.equal(await (await fetch(url)).text(), "instrumental");
 });

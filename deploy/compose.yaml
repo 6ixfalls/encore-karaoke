@@ -11,7 +11,8 @@ services:
       FFMPEG_GPU: ${FFMPEG_GPU:-0}
       TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
     read_only: true
-    tmpfs: ["/tmp:size=64m,noexec,nosuid"]
+    # One prepared instrumental (capped at 1 GiB) plus processing scratch space.
+    tmpfs: ["/tmp:size=1200m,noexec,nosuid"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     mem_limit: 6g

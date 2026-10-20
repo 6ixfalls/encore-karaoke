@@ -47,7 +47,6 @@ export interface Room {
   tempo: number;
   position: number;
   sampleTime?: number;
-  cheers?: { id: string; nickname: string; message: string; time: number }[];
   scores?: { playbackId: string; title: string; nickname: string; value: number; mode: "guide" | "stability" }[];
   members: Record<string, { nickname: string; role: Role }>;
   policy: { roomCap: number; guestCap: number; guestControl: boolean };
@@ -60,6 +59,8 @@ export interface Invitation {
   code: string;
 }
 export interface Song {
+  duration?: number;
+  metadataExpires?: number;
   id: string;
   title: string;
   artist: string;

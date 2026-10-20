@@ -88,14 +88,14 @@ export class Rooms {
       revision: room.revision,
       queue: room.queue,
       current: room.current,
-      seekable: false,
+      seekable: true,
+      duration: room.current ? this.store.get("songs", room.current.songId)?.duration : undefined,
       desired: room.desired,
       observed: room.observed,
       volume: room.volume,
       tempo: room.tempo,
       position: room.position,
       sampleTime: room.sampleTime,
-      cheers: (room.cheers || []).filter((c) => this.clock() - c.time < 8000),
       scores: room.scores || [],
       policy: room.policy,
       participants: Object.entries(room.members).map(([id, m]) => ({
@@ -262,7 +262,9 @@ export class Rooms {
       requireValue(room.status === "open" || host, "room_locked", 403);
       const videoId = text(p.youtube, 11);
       requireValue(/^[a-zA-Z0-9_-]{11}$/.test(videoId), "invalid_youtube_id");
-      const song = { id: `yt:${videoId}`, title: text(p.title, 200), artist: "YouTube", format: "youtube" as const, videoId };
+      const metadata = this.store.get("songs", `yt:${videoId}`);
+      const song = metadata || { id: `yt:${videoId}`, title: text(p.title, 200), artist: typeof p.artist === "string" ? text(p.artist, 200) : "YouTube Music", format: "youtube" as const, videoId };
+      delete song.metadataExpires;
       this.store.put("songs", song.id, song);
       room.queue.push({
         id: randomUUID(),
@@ -272,12 +274,6 @@ export class Rooms {
         owner: session.id,
         nickname: session.nickname,
       });
-      return;
-    }
-    if (type === "cheer") {
-      const message = text(p.message, 120);
-      room.cheers = [...(room.cheers || []).filter((c) => this.clock() - c.time < 8000),
-        { id: randomUUID(), nickname: session.nickname, message, time: this.clock() }].slice(-12);
       return;
     }
     if (type === "remove") {
@@ -327,7 +323,11 @@ export class Rooms {
         this.next(room);
         break;
       case "seek":
-        throw new Fault("live_separation_not_seekable", 409);
+        requireValue(room.current, "queue_empty", 409);
+        room.current.seek = { id: randomUUID(), position: number(p.position, 0,
+          this.store.get("songs", room.current.songId)?.duration || 600) };
+        room.position = room.current.seek.position;
+        break;
       case "volume":
         room.volume = number(p.value, 0, 1);
         break;
@@ -428,7 +428,7 @@ export class Rooms {
       };
       room.desired = "paused";
       room.observed = "ready";
-      if (room.current) room.position = 0;
+      if (room.current) room.current.seek = { id: randomUUID(), position: room.position };
       room.revision++;
       this.store.put("rooms", room.id, room);
       return {
