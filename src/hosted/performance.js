@@ -10,8 +10,9 @@ export function detectPitch(samples, sampleRate) {
   return hz === null ? null : freqToSemitone(hz);
 }
 export class PerformanceTools {
-  constructor({ status, score, recording }) {
-    Object.assign(this, { status, score, recording });
+  constructor({ status, score, recording, staff }) {
+    Object.assign(this, { status, score, recording, staff });
+    this.remoteInputs = new Map();
     this.references = new Map();
     this.latency = DEFAULT_MIC_LATENCY_COMPENSATION_SEC;
     this.detector = createMicPitchDetector();
@@ -21,6 +22,7 @@ export class PerformanceTools {
     this.samples = 0; this.credit = 0; this.mode = "stability"; this.previousPitch = null;
     this.referenceScore = null; this.reference = null; this.guideNotes = null;
     this.liveReference = null; this.pendingScores = [];
+    this.staff?.reset();
   }
   setLatency(milliseconds) {
     const value = Number(milliseconds);
@@ -90,6 +92,33 @@ export class PerformanceTools {
       this.referenceScore.update(sample.time, sample.hz, this.latency, sample.rate);
     }
   }
+  attachRemoteMicrophone(id, source, context) {
+    this.detachRemoteMicrophone(id);
+    const analyser = context.createAnalyser(); analyser.fftSize = 2048;
+    source.connect(analyser);
+    this.remoteInputs.set(id, { source, analyser, context, detector: createMicPitchDetector(), buffer: new Float32Array(2048) });
+  }
+  detachRemoteMicrophone(id) {
+    const input = this.remoteInputs.get(id);
+    if (!input) return;
+    input.source.disconnect(input.analyser); input.analyser.disconnect();
+    this.remoteInputs.delete(id);
+  }
+  renderStaff(player, localHz, active) {
+    if (!this.staff?.enabled) return;
+    const singers = [];
+    if (this.analyser) singers.push({ id: "local", pitch: localHz === null ? null : freqToSemitone(localHz) });
+    for (const [id, input] of this.remoteInputs) {
+      let hz = null;
+      if (active) {
+        input.analyser.getFloatTimeDomainData(input.buffer);
+        hz = detectPitchFromSamplesMic(input.detector, input.buffer, input.context.sampleRate);
+      }
+      singers.push({ id, pitch: hz === null ? null : freqToSemitone(hz) });
+    }
+    this.staff.render({ time: player.audio.currentTime, reference: this.reference, singers, active,
+      latency: this.latency });
+  }
   async startMicrophone(player) {
     if (!player.valid()) throw new Error("start_display_first");
     if (this.stream) return;
@@ -133,7 +162,9 @@ export class PerformanceTools {
   update(player) {
     this.drawFrame?.();
     const time = player.audio.currentTime;
-    if (!this.analyser || !player.valid() || player.audio.paused || player.loading || !player.loaded) {
+    const active = !!(player.valid() && !player.audio.paused && !player.loading && player.loaded);
+    if (!this.analyser || !active) {
+      this.renderStaff(player, null, active);
       if (!this.liveReference || !this.pendingScores.length) this.referenceScore?.anchor(time);
       this.previousPitch = null;
       return;
@@ -141,6 +172,7 @@ export class PerformanceTools {
     this.analyser.getFloatTimeDomainData(this.buffer);
     const hz = detectPitchFromSamplesMic(this.detector, this.buffer, this.context.sampleRate);
     const pitch = hz === null ? null : freqToSemitone(hz);
+    this.renderStaff(player, hz, active);
     if (this.liveReference) {
       if (this.pendingScores.length >= 400) {
         this.liveReference.failed = true;

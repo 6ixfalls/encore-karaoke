@@ -368,3 +368,7 @@ body.control #welcome .columns, body.tv #welcome .columns { grid-template-column
 .dashboard > header, .dashboard footer, .dashboard #welcome, .dashboard #lobby, .dashboard #room { display: none; }
 
 #recordings video, #recordings audio { display: block; width: 100%; max-width: 960px; margin: 1rem auto; }
+
+#pitch-staff { border: 1px solid #ffffff30; border-radius: 12px; background: #0b1024e8; overflow: hidden; text-align: left; }
+#pitch-staff[hidden] { display: none; }
+#pitch-canvas { display: block; width: 100%; height: clamp(120px, 20vh, 200px); }

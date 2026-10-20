@@ -66,8 +66,12 @@
           <div id="next-lyrics"></div>
           <p id="progress" class="muted"></p>
           <p id="score" role="status"></p>
+          <section id="pitch-staff" hidden>
+            <canvas id="pitch-canvas"></canvas>
+          </section>
           <div id="display-controls" hidden>
             <button id="fullscreen">Fullscreen</button>
+            <button id="toggle-scoring" aria-pressed="false" aria-controls="pitch-staff">Live scoring: off</button>
             <div class="controls">
               <button id="enable-mic">Enable microphone &amp; scoring</button>
               <button id="disable-mic">Disable microphone</button>

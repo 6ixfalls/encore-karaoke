@@ -35,10 +35,14 @@ export class RemoteMicrophone {
       } else if (pc.connectionState === "connected") this.status("Microphone connected to the TV.");
     };
     pc.ontrack = ({ track, streams }) => {
-      if (!this.tv || track.kind !== "audio" || !this.player.valid()) return;
+      if (this.peers.get(id) !== entry || !this.tv || track.kind !== "audio" || !this.player.valid()) return;
+      this.player.performanceTools?.detachRemoteMicrophone(id);
+      entry.source?.disconnect();
       const stream = streams[0] || new MediaStream([track]);
       entry.source = this.player.context.createMediaStreamSource(stream);
       entry.source.connect(this.player.gate);
+      this.player.performanceTools?.attachRemoteMicrophone(id, entry.source, this.player.context);
+      track.addEventListener?.("ended", () => { if (this.peers.get(id) === entry) this.closePeer(id); }, { once: true });
     };
     return entry;
   }
@@ -89,6 +93,7 @@ export class RemoteMicrophone {
     const entry = this.peers.get(id);
     if (!entry) return;
     this.peers.delete(id);
+    this.player.performanceTools?.detachRemoteMicrophone(id);
     entry.source?.disconnect();
     entry.pc.close();
   }

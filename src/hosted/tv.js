@@ -14,6 +14,9 @@ export function mountTV() {
   $("end").classList.add("action-button");
   shell.querySelector(".bottom-actions").append($("end"));
   shell.querySelector(".top-bar-container").append($("now-title"), $("now-artist"), $("playback-status"));
+  shell.append($("pitch-staff"));
+  shell.querySelector(".bottom-actions").append($("toggle-scoring"));
+  $("toggle-scoring").classList.add("action-button");
   shell.querySelector(".player-ui").append($("lyrics"), $("next-lyrics"), $("score"));
   const dock = document.createElement("div");
   dock.className = "tv-dock";
@@ -25,7 +28,10 @@ export function mountTV() {
   library.id = "tv-library"; library.hidden = true;
   const close = document.createElement("button"); close.textContent = "Back to TV (Escape)";
   close.onclick = () => { library.hidden = true; };
-  library.append(close, document.querySelector("#room > .columns"));
+  const performanceSettings = document.createElement("details");
+  const performanceSummary = document.createElement("summary"); performanceSummary.textContent = "Microphone, scoring & recording";
+  performanceSettings.append(performanceSummary, $("display-controls"));
+  library.append(close, document.querySelector("#room > .columns"), performanceSettings);
   $("room").append(shell, library);
   document.querySelector(".room-heading").hidden = true;
   $("host-tools").classList.add("tv-management");

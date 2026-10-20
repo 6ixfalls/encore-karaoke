@@ -56,3 +56,20 @@ body.tv:has(#room:not([hidden])) #host-tools { display: none; }
 }
 #tv-appliance .player-ui[hidden] { display: none; }
 #tv-appliance #tv-pairing { justify-self: center; white-space: nowrap; }
+#tv-appliance #pitch-staff { position: absolute; top: 19%; left: 5%; right: 5%; z-index: 14; pointer-events: none; }
+#tv-library #display-controls { margin-top: 1rem; }
+#tv-library details { margin-top: 1.5rem; }
+#tv-appliance #toggle-scoring[aria-pressed="true"] { border-color: #6ee7ff; color: #6ee7ff; background: #172d3a; }
+@media (max-height: 600px) {
+  #tv-appliance #pitch-staff { top: 17%; left: 2%; right: 2%; }
+  #tv-appliance #pitch-canvas { height: 110px; }
+}
+
+#tv-appliance.mode-menu #pitch-staff { visibility: hidden; }
+@media (max-width: 700px) {
+  #tv-appliance #qr { width: 72px; height: 72px; }
+  #tv-appliance .qr-code-container { top: 85px; padding: 8px; }
+  #tv-appliance #manual-code { margin: 6px 0; font-size: 18px; }
+  #tv-appliance #pitch-staff { top: 28%; }
+  #tv-appliance #pitch-canvas { height: 110px; }
+}

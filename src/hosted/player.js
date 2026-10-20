@@ -20,6 +20,9 @@ export class BrowserPlayer {
     window.addEventListener("pagehide", () => this.stop().catch(() => {}));
   }
   bindMedia(media) {
+    media.addEventListener("seeking", () => {
+      if (this.audio === media) this.performanceTools?.staff?.reset();
+    });
     for (const [event, state] of Object.entries({
       playing: "playing",
       pause: "paused",

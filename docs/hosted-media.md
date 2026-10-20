@@ -14,7 +14,15 @@ The container reserves up to 1200 MiB of temporary memory for the prepared instr
 
 The server analyzes vocal PCM into timestamped pitch references for Nightingale scoring. The main-screen microphone is compared with those references, allowing octave equivalence. Scores remain provisional until reference processing completes. Missed vocal time reduces the final result. Microphone delay can be adjusted from 0–500 ms. Microphone capture, permissions and recording are browser-controlled; recent scores are ephemeral room state.
 
-Phone microphones use direct room-scoped WebRTC into the main screen's audio gate. They need browser permission and a trusted HTTPS origin. No TURN relay is configured; direct LAN connectivity is normally needed. Phone audio currently feeds playback rather than the main-screen scoring analyser.
+Phone microphones use direct room-scoped WebRTC into the main screen's audio gate. They need browser permission and a trusted HTTPS origin. No TURN relay is configured; direct LAN connectivity is normally needed. Each connected phone also supplies an independent pitch marker when the live guide is enabled. Phone pitch feedback does not contribute to the main-screen microphone’s final room score.
+
+## Live pitch staff
+
+Select **Live scoring: on** on the TV to show the optional guide (off by default). Gold bars show the extracted vocal melody over an eight-second scrolling window; the white playhead marks the note to sing now. Each enabled TV or phone microphone has a numbered, colored marker and a short pitch trail. Silence breaks the trail. A green marker ring indicates a match within half a semitone in the actual target octave.
+
+The five staff lines follow the current register, with labeled C notes identifying octaves. Large octave jumps move the staff and expand its range to keep the melody and singers visible. The visual guide preserves actual octaves even though the existing Nightingale final score accepts octave equivalence. Pausing freezes the timeline; seeking or changing songs clears the pitch trails. Missing references and instrumental passages leave the target bars empty.
+
+TV microphone permissions, recording and the 0–500 ms microphone-delay setting are under **Search songs → Microphone, scoring & recording**. The delay also aligns live pitch feedback to the reference. Showing the guide does not request microphone access; phone microphones remain controlled on each phone.
 
 ## Timed lyrics
 

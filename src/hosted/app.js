@@ -1,5 +1,6 @@
 import { BrowserServices } from "../platform/BrowserServices.js";
 import { BrowserPlayer } from "./player.js";
+import { PitchStaff } from "./scoring/staff.js";
 import { PerformanceTools } from "./performance.js";
 import { mountTV } from "./tv.js";
 import { RemoteMicrophone } from "./remote-microphone.js";
@@ -52,7 +53,9 @@ const label = (value, className) => {
 };
 const isHost = () => session?.role === "host";
 const recordingUrls = [];
+const staff = new PitchStaff($("pitch-staff"), $("pitch-canvas"));
 const performanceTools = new PerformanceTools({
+  staff,
   status: (text) => { $("performance-status").textContent = text; },
   score: (text) => { $("score").textContent = text; },
   recording: (blob, title) => {
@@ -259,6 +262,11 @@ $("youtube-form").addEventListener("submit", run(async () => {
     return row;
   }));
 }));
+$("toggle-scoring").addEventListener("click", () => {
+  staff.setEnabled(!staff.enabled);
+  $("toggle-scoring").setAttribute("aria-pressed", String(staff.enabled));
+  $("toggle-scoring").textContent = `Live scoring: ${staff.enabled ? "on" : "off"}`;
+});
 $("mic-latency").addEventListener("change", run(() => {
   performanceTools.setLatency($("mic-latency").value);
 }));
