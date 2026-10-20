@@ -65,7 +65,7 @@ body.tv:has(#room:not([hidden])) #host-tools { display: none; }
   #tv-appliance #pitch-canvas { height: 110px; }
 }
 
-#tv-appliance.mode-menu #pitch-staff { visibility: hidden; }
+#tv-appliance.mode-menu:not(.mode-player) #pitch-staff { visibility: hidden; }
 @media (max-width: 700px) {
   #tv-appliance #qr { width: 72px; height: 72px; }
   #tv-appliance .qr-code-container { top: 85px; padding: 8px; }

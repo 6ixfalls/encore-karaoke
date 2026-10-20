@@ -23,7 +23,7 @@ export function mountTV() {
   dock.append(shell.querySelector(".bottom-actions"), $("play-controls"));
   shell.append(dock);
   shell.querySelector(".qr-image-wrapper").append($("qr"), $("manual-code"));
-  for (const id of ["progress", "performance-status", "recordings", "clear-recordings"]) $(id).hidden = true;
+  $("progress").hidden = true;
   const library = document.createElement("section");
   library.id = "tv-library"; library.hidden = true;
   const close = document.createElement("button"); close.textContent = "Back to TV (Escape)";
