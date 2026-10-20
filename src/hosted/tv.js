@@ -26,7 +26,7 @@ export function mountTV() {
   document.querySelector(".room-heading").hidden = true;
   $("host-tools").classList.add("tv-management");
   $("host-tools").hidden = true;
-  $("tv-search").onclick = () => { library.hidden = !library.hidden; if (!library.hidden) $("search").focus(); };
+  $("tv-search").onclick = () => { library.hidden = !library.hidden; if (!library.hidden) $("youtube-query").focus(); };
   $("tv-fullscreen").onclick = () => document.documentElement.requestFullscreen?.();
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") library.hidden = true;

@@ -6,55 +6,30 @@ import { randomUUID } from "node:crypto";
 import { secret, digest } from "./store.js";
 import { requireValue, text, Fault } from "../shared/contracts.js";
 
-export class Auth {
+export class Participants {
   attempts: Map<string, number[]>;
   constructor(private store: Store, private config: Configuration) {
     this.attempts = new Map();
   }
-  session(cookie = ""): Session | null {
-    const token = cookie
-      .split(";")
-      .map((s) => s.trim())
-      .find((s) => s.startsWith("encore_session="))
-      ?.slice(15);
-    const session = token ? this.store.get("sessions", digest(token)) : undefined;
-    return session &&
-      !session.revoked &&
-      session.epoch === this.store.authEpoch &&
-      session.expires > Date.now()
-      ? session
-      : null;
+  session(token: unknown): Session | null {
+    const session = typeof token === "string" ? this.store.get("sessions", digest(token)) : undefined;
+    return session && !session.revoked && session.expires > Date.now() ? session : null;
   }
-  create(role: Role, nickname: unknown, principal?: string) {
+  create(role: Role, nickname: unknown) {
     const token = secret();
     const session: Session = {
-      id: randomUUID(),
-      role,
-      nickname: text(nickname, 40),
-      csrf: secret(),
-      epoch: this.store.authEpoch,
-      principal: principal || (["admin", "host"].includes(role) ? secret() : undefined),
-      expires: Date.now() + 7 * 86_400_000,
-      tokenHash: digest(token),
-      revoked: false,
+      id: randomUUID(), role, nickname: text(nickname, 40),
+      expires: Date.now() + 24 * 60 * 60_000,
+      tokenHash: digest(token), revoked: false,
     };
     this.store.put("sessions", session.tokenHash, session);
-    return {
-      session,
-      cookie: `encore_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${this.config.secure ? "; Secure" : ""}`,
-    };
+    return { session, token };
   }
   origin(origin: unknown) {
     requireValue(origin === this.config.origin, "invalid_origin", 403);
   }
   mutation(req: Request) {
     this.origin(req.headers.origin);
-    if (req.session)
-      requireValue(
-        req.headers["x-csrf-token"] === req.session.csrf,
-        "invalid_csrf",
-        403,
-      );
   }
   throttle(key: string, limit = 10) {
     const now = Date.now();

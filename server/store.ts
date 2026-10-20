@@ -1,96 +1,54 @@
 import type { Tables } from "./types.js";
-import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
-import { requireValue } from "../shared/contracts.js";
-import { secret } from "./secrets.js";
-import { migrate } from "./schema.js";
-
 export { secret, digest } from "./secrets.js";
 
+type Change = { table: keyof Tables; id: string; previous: unknown; existed: boolean };
+
+/** Process-local room state. Nothing is read from or written to disk. */
 export class Store {
-  db: DatabaseSync;
-  authEpoch: string;
-  deployment: string;
-  constructor(directory: string) {
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    this.db = new DatabaseSync(path.join(directory, "encore.sqlite"));
-    this.db.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
-    );
-    try {
-      migrate(this.db, directory);
-    } catch (error) {
-      this.db.close();
-      throw error;
-    }
-    if (!this.get("meta", "authEpoch")) this.put("meta", "authEpoch", secret());
-    this.authEpoch = this.get("meta", "authEpoch") as string;
-    // Every process has a new deployment epoch. Authentication survives normal restarts.
-    this.deployment = secret();
-    this.put("meta", "deployment", this.deployment);
-    this.transaction(() => {
-      for (const room of this.all("rooms")) {
-        room.desired = "paused";
-        room.observed = "unavailable";
-        if (room.lease && !room.lease.retired)
-          room.lease.releaseRequested = true;
-        room.revision++;
-        this.put("rooms", room.id, room);
-      }
-    });
-  }
+  private tables = new Map<keyof Tables, Map<string, unknown>>();
+  private journal: Change[] | null = null;
+  attempts: { device: string; room: string; time: number }[] = [];
   get<T extends keyof Tables>(table: T, id: string): Tables[T] | undefined {
-    const row = this.db
-      .prepare(
-        `SELECT value FROM ${this.table(table)} WHERE ${table === "meta" ? "key" : "id"}=?`,
-      )
-      .get(id);
-    return row ? JSON.parse(row.value as string) : undefined;
+    const value = this.tables.get(table)?.get(id);
+    return value === undefined ? undefined : structuredClone(value) as Tables[T];
+  }
+  private record(table: keyof Tables, id: string) {
+    const values = this.tables.get(table);
+    this.journal?.push({ table, id, previous: values?.get(id), existed: values?.has(id) ?? false });
   }
   put<T extends keyof Tables>(table: T, id: string, value: Tables[T]) {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO ${this.table(table)} (${table === "meta" ? "key" : "id"},value) VALUES (?,?)`,
-      )
-      .run(id, JSON.stringify(value));
+    this.record(table, id);
+    if (!this.tables.has(table)) this.tables.set(table, new Map());
+    this.tables.get(table)!.set(id, structuredClone(value));
   }
   all<T extends keyof Tables>(table: T): Tables[T][] {
-    return this.db
-      .prepare(`SELECT value FROM ${this.table(table)}`)
-      .all()
-      .map((r) => JSON.parse(r.value as string));
+    return [...(this.tables.get(table)?.values() || [])].map(value => structuredClone(value) as Tables[T]);
   }
   delete(table: keyof Tables, id: string) {
-    this.db.prepare(`DELETE FROM ${this.table(table)} WHERE id=?`).run(id);
-  }
-  table(name: keyof Tables) {
-    requireValue(
-      [
-        "meta",
-        "sessions",
-        "rooms",
-        "invites",
-        "songs",
-        "assets",
-        "commands",
-        "audit",
-      ].includes(name),
-    );
-    return name;
+    this.record(table, id);
+    this.tables.get(table)?.delete(id);
   }
   transaction<T>(fn: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = fn();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
+    const nested = this.journal !== null;
+    this.journal ??= [];
+    const checkpoint = this.journal.length, attempts = this.attempts.slice();
+    try { return fn(); }
+    catch (error) {
+      for (let i = this.journal.length - 1; i >= checkpoint; i--) {
+        const { table, id, previous, existed } = this.journal[i];
+        if (existed) this.tables.get(table)!.set(id, previous);
+        else this.tables.get(table)?.delete(id);
+      }
+      this.journal.length = checkpoint;
+      this.attempts = attempts;
       throw error;
-    }
+    } finally { if (!nested) this.journal = null; }
   }
-  close() {
-    this.db.close();
+  sweep(now: number) {
+    for (const table of ["sessions", "commands", "invites"] as const)
+      for (const [id, value] of this.tables.get(table) || [])
+        if ((value as { expires: number }).expires < now) this.delete(table, id);
+    this.attempts = this.attempts.filter(a => a.time > now - 10_000);
   }
+  close() { this.tables.clear(); this.attempts = []; }
 }

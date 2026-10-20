@@ -2,6 +2,9 @@ import * as esbuild from "esbuild";
 import fs from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 
+for (const name of ["auth", "library", "operations", "schema"])
+  for (const suffix of [".js", ".js.map"])
+    await fs.rm(`dist/server/${name}${suffix}`, { force: true });
 await fs.mkdir("dist/web/assets/fonts", { recursive: true });
 await fs.copyFile("server/separation_worker.py", "dist/server/separation_worker.py");
 await esbuild.build({

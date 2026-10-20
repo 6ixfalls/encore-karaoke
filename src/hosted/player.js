@@ -1,13 +1,6 @@
-import { parseLrc } from "./lrc.js";
-import { parseMidi, renderMidi } from "./midi.js";
-import { Cdg } from "./cdg.js";
-
 export class BrowserPlayer {
-  constructor(services, { telemetry, lyrics, error, released, media, cdg, performance: performanceTools }) {
+  constructor(services, { telemetry, lyrics, error, released, media, performance: performanceTools }) {
     Object.assign(this, { services, telemetry, lyrics, error, released });
-    try {
-      this.pendingRelease = JSON.parse(sessionStorage.getItem("encore-display-release") || "null");
-    } catch { this.pendingRelease = null; }
     this.generation = null;
     this.revalidated = false;
     this.retired = new Set();
@@ -15,7 +8,6 @@ export class BrowserPlayer {
     this.loaded = null;
     this.audio = media || new Audio();
     this.localMedia = this.audio;
-    this.cdgCanvas = cdg;
     this.performanceTools = performanceTools;
     this.audio.preload = "auto";
     this.loadingVersion = 0;
@@ -64,13 +56,9 @@ export class BrowserPlayer {
     this.audio.removeAttribute("src");
     this.audio.load();
     this.audio = this.localMedia;
-    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.objectUrl = null;
-    this.cdg = null;
     this.song = null;
     this.guideNotes = [];
     if (this.localMedia.hidden !== undefined) this.localMedia.hidden = true;
-    if (this.cdgCanvas) this.cdgCanvas.hidden = true;
     this.performanceTools?.trackChanged();
   }
   async initialize() {
@@ -130,14 +118,12 @@ export class BrowserPlayer {
   }
   async claim(roomId) {
     await this.initialize();
-    await this.releasePending();
     this.roomId = roomId;
     const start = performance.now();
     const grant = await this.services.request(
       `/api/rooms/${roomId}/display/claim`,
       { method: "POST", body: {} },
     );
-    this.releaseToken = grant.releaseToken;
     try {
       this.arm(grant, start);
     } catch (error) {
@@ -255,71 +241,18 @@ export class BrowserPlayer {
       this.lines = [];
       this.clearMedia();
       try {
-        const song = await this.services.request(
-          `/api/library/songs/${room.current.songId}?roomId=${room.id}`,
-        );
-        if (
-          version !== this.loadingVersion ||
-          !this.valid() ||
-          this.loaded !== playbackId
-        )
+        const separated = await this.services.request(`/api/rooms/${room.id}/separation`,
+          { method: "POST", body: { playbackId } });
+        if (version !== this.loadingVersion || !this.valid()) {
+          this.services.request(`/api/rooms/${room.id}/separation/${separated.id}/stop`, { method: "POST", body: {} }).catch(() => {});
           return;
-        const getBuffer = async (id, limit) => {
-          const response = await fetch(this.services.media(id, room.id));
-          if (!response.ok || Number(response.headers?.get("content-length")) > limit) throw new Error("companion_unavailable");
-          const buffer = await response.arrayBuffer();
-          if (buffer.byteLength > limit) throw new Error("companion_too_large");
-          return buffer;
-        };
-        if (song.format === "youtube") {
-          const separated = await this.services.request(`/api/rooms/${room.id}/separation`,
-            { method: "POST", body: { playbackId } });
-          if (version !== this.loadingVersion || !this.valid()) {
-            this.services.request(`/api/rooms/${room.id}/separation/${separated.id}/stop`, { method: "POST", body: {} }).catch(() => {});
-            return;
-          }
-          this.separation = { id: separated.id, roomId: room.id };
-          this.audio.src = separated.media;
-          this.audio.hidden = false;
-          this.performanceTools?.beginLiveReference?.();
-          this.pollSeparation(version, playbackId);
-        } else if (song.format === "midi") {
-          const midi = parseMidi(await getBuffer(song.assetId, 4 * 1024 * 1024));
-          const blob = await renderMidi(midi);
-          if (version !== this.loadingVersion || !this.valid()) return;
-          this.objectUrl = URL.createObjectURL(blob);
-          this.audio.src = this.objectUrl;
-          this.lines = midi.lyrics;
-          this.guideNotes = midi.notes.filter((n) => n.channel !== 9);
-        } else {
-          this.audio.src = this.services.media(song.assetId, room.id);
-          this.audio.hidden = song.format !== "video";
         }
-        this.song = song;
-        if (song.guideId) {
-          const guide = parseMidi(await getBuffer(song.guideId, 4 * 1024 * 1024));
-          if (version !== this.loadingVersion || !this.valid()) return;
-          this.guideNotes = guide.notes.filter((n) => n.channel !== 9);
-        }
-        if (song.cdgId && this.cdgCanvas) {
-          const buffer = await getBuffer(song.cdgId, 32 * 1024 * 1024);
-          if (version !== this.loadingVersion || !this.valid()) return;
-          this.cdg = new Cdg(buffer, this.cdgCanvas);
-          this.cdgCanvas.hidden = false;
-        }
-        if (song.lyricsId) {
-          const response = await fetch(
-            this.services.media(song.lyricsId, room.id),
-          );
-          if (!response.ok) throw new Error("lyrics_unavailable");
-          const lines = parseLrc(await response.text());
-          if (version !== this.loadingVersion || !this.valid()) return;
-          this.lines = lines;
-        }
-        if (version !== this.loadingVersion || !this.valid()) return;
-        if (song.format !== "youtube") await this.performanceTools?.prepareReference?.(this, song, getBuffer,
-          () => version === this.loadingVersion && this.valid() && this.loaded === playbackId);
-        if (version !== this.loadingVersion || !this.valid()) return;
+        this.separation = { id: separated.id, roomId: room.id };
+        this.audio.src = separated.media;
+        this.audio.hidden = false;
+        this.song = { format: "youtube" };
+        this.performanceTools?.beginLiveReference?.();
+        this.pollSeparation(version, playbackId);
         this.loading = false;
         this.mediaState = "ready";
         this.failedPlaybackId = null;
@@ -385,7 +318,6 @@ export class BrowserPlayer {
   }
   renderLyrics() {
     const position = this.audio.currentTime;
-    this.cdg?.render(position);
     this.performanceTools?.update(this);
     const index = (this.lines || []).findLastIndex(
       (line) => line.time <= position,
@@ -413,11 +345,9 @@ export class BrowserPlayer {
   }
   async stop() {
     if (this.stopping) return this.stopping;
-    const generation = this.generation,
-      releaseToken = this.releaseToken;
+    const generation = this.generation;
     this.generation = null;
     this.revalidated = false;
-    this.releaseToken = null;
     if (generation) this.retired.add(generation);
     this.loadingVersion++;
     this.loading = false;
@@ -432,44 +362,20 @@ export class BrowserPlayer {
     this.performanceTools?.stopMicrophone();
     this.lines = [];
     this.lyrics("", "");
-    if (!generation) {
-      if (this.pendingRelease) await this.releasePending();
-      return;
-    }
-    const drainMs = Math.max(300, ((this.context.outputLatency || 0) + (this.context.baseLatency || 0)) * 1000 + 200);
-    // Page unload may cancel the asynchronous release. The next page can finish
-    // acknowledging this generation only after its synchronously muted output drains.
-    this.pendingRelease = { roomId: this.roomId, generation, releaseToken, readyAfter: Date.now() + drainMs };
-    try { sessionStorage.setItem("encore-display-release", JSON.stringify(this.pendingRelease)); } catch { /* Storage may be disabled. */ }
+    if (!generation) return;
     this.stopping = (async () => {
-      // Drain any hardware buffering before acknowledging a permanently retired generation.
       await this.context.suspend();
-      await new Promise((resolve) => setTimeout(resolve, drainMs));
-      await this.releasePending();
+      try {
+        await this.services.request(`/api/rooms/${this.roomId}/display/stop`, {
+          method: "POST", keepalive: true, body: { generation },
+        });
+      } catch (error) {
+        // Restarted/ended rooms need no release acknowledgment. A failed stop
+        // expires through the heartbeat; there is no replacement display.
+        if (![401, 404, 409].includes(error.status)) this.error(error);
+      }
+      this.released();
     })();
-    try {
-      await this.stopping;
-    } finally {
-      this.stopping = null;
-    }
-  }
-  async releasePending() {
-    const pending = this.pendingRelease;
-    if (!pending) return;
-    const remaining = (pending.readyAfter || 0) - Date.now();
-    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-    await this.services.request(`/display-release/${pending.roomId}`, {
-      method: "POST",
-      keepalive: true,
-      body: {
-        generation: pending.generation,
-        releaseToken: pending.releaseToken,
-      },
-    });
-    if (this.pendingRelease === pending) {
-      this.pendingRelease = null;
-      try { sessionStorage.removeItem("encore-display-release"); } catch { /* Storage may be disabled. */ }
-    }
-    this.released();
+    try { await this.stopping; } finally { this.stopping = null; }
   }
 }

@@ -1,5 +1,5 @@
 import type { Store } from "./store.js";
-import type { Room, Session, Invitation, Command, CommandResult, Telemetry, Retirement } from "./types.js";
+import type { Room, Session, Invitation, Command, CommandResult, Telemetry } from "./types.js";
 import { randomUUID, randomInt } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import {
@@ -25,7 +25,7 @@ export class Rooms {
     this.deadlines = new Map();
   }
   host(session: Session) {
-    return ["host", "admin"].includes(session.role);
+    return session.role === "host";
   }
   room(id: string, session: Session | null, { ended = false } = {}) {
     const room = this.store.get("rooms", id);
@@ -35,16 +35,12 @@ export class Rooms {
       404,
     );
     requireValue(
-      session && !session.revoked && session.epoch === this.store.authEpoch,
+      session && !session.revoked,
       "unauthorized",
       401,
     );
     requireValue(
-      session.role === "admin" ||
-        (this.host(session) &&
-          room.ownerPrincipal &&
-          room.ownerPrincipal === session.principal) ||
-        room.members[session.id],
+      room.members[session.id],
       "forbidden",
       403,
     );
@@ -60,7 +56,7 @@ export class Rooms {
     const room: Room = {
       id: randomUUID(),
       name: text(name),
-      ownerPrincipal: session.principal,
+      screenId: session.id,
       status: "open",
       revision: 0,
       queue: [],
@@ -92,7 +88,7 @@ export class Rooms {
       revision: room.revision,
       queue: room.queue,
       current: room.current,
-      seekable: !room.current || this.store.get("songs", room.current.songId)?.format !== "youtube",
+      seekable: false,
       desired: room.desired,
       observed: room.observed,
       volume: room.volume,
@@ -102,7 +98,6 @@ export class Rooms {
       cheers: (room.cheers || []).filter((c) => this.clock() - c.time < 8000),
       scores: room.scores || [],
       policy: room.policy,
-      recoveryRequired: !!room.recoveryRequired,
       participants: Object.entries(room.members).map(([id, m]) => ({
         id,
         ...m,
@@ -129,7 +124,7 @@ export class Rooms {
       this.store.put("rooms", room.id, room);
     }
     const grant: Invitation = {
-      roomId, epoch: this.store.authEpoch, kind: "guest",
+      roomId,
       invitation: digest(room.pairing.token), code: digest(room.pairing.code),
       expires: room.expires || this.clock() + 24 * 60 * 60_000,
     };
@@ -137,45 +132,11 @@ export class Rooms {
     this.store.put("invites", grant.code, grant);
     return { invitation: room.pairing.token, code: room.pairing.code, expires: grant.expires };
   }
-  invite(roomId: string, session: Session, kind: unknown = "guest") {
-    this.room(roomId, session);
-    requireValue(this.host(session), "forbidden", 403);
-    requireValue(kind === "guest" || kind === "display");
-    const invitation = secret();
-    let code;
-    do {
-      code = String(randomInt(100000, 1000000));
-    } while (this.store.get("invites", digest(code)));
-    const value: Invitation = {
-      roomId,
-      epoch: this.store.authEpoch,
-      expires: this.clock() + 15 * 60_000,
-      kind,
-      invitation: digest(invitation),
-      code: digest(code),
-    };
-    this.store.transaction(() => {
-      for (const previous of this.store
-        .all("invites")
-        .filter((i) => i.roomId === roomId && i.kind === kind)) {
-        this.store.delete("invites", previous.invitation);
-        this.store.delete("invites", previous.code);
-      }
-      this.store.put("invites", value.invitation, value);
-      if (kind === "guest") this.store.put("invites", value.code, value);
-    });
-    return {
-      invitation,
-      code: kind === "guest" ? code : undefined,
-      expires: value.expires,
-    };
-  }
   join(invitation: unknown, session: Session) {
     return this.store.transaction(() => {
       const grant = this.store.get("invites", digest(text(invitation, 128)));
       requireValue(
         grant &&
-          grant.epoch === this.store.authEpoch &&
           grant.expires > this.clock(),
         "expired_invitation",
         403,
@@ -184,13 +145,13 @@ export class Rooms {
       requireValue(room && room.status === "open", "room_locked", 403);
       const activeMembers = new Set(
         this.store.all("sessions")
-          .filter((s) => !s.revoked && s.epoch === this.store.authEpoch && s.expires > this.clock())
+          .filter((s) => !s.revoked && s.expires > this.clock())
           .map((s) => s.id),
       );
       for (const id of Object.keys(room.members))
         if (!activeMembers.has(id)) delete room.members[id];
       requireValue(Object.keys(room.members).length < 200, "room_full", 409);
-      session.role = grant.kind;
+      session.role = "guest";
       session.roomId = room.id;
       room.members[session.id] = {
         nickname: session.nickname,
@@ -199,10 +160,6 @@ export class Rooms {
       room.revision++;
       this.store.put("sessions", session.tokenHash, session);
       this.store.put("rooms", room.id, room);
-      if (grant.kind === "display") {
-        this.store.delete("invites", grant.invitation);
-        this.store.delete("invites", grant.code);
-      }
       return room;
     });
   }
@@ -272,62 +229,24 @@ export class Rooms {
   admitCommand(session: Session) {
     const now = this.clock();
     const device = `command:${session.id}`;
-    // Separate namespaces keep general command budgets independent of enqueue admission.
-    // Persist the budget so reconnects and process restarts cannot reset it.
-    const attempts = this.store.db.prepare(
-      "SELECT device,time FROM attempts WHERE room='commands' AND time>? ORDER BY time",
-    ).all(now - LIMITS.windowMs);
+    this.store.attempts = this.store.attempts.filter(a => a.time > now - LIMITS.windowMs);
+    const attempts = this.store.attempts.filter(a => a.room === "commands");
     const own = attempts.filter((a) => a.device === device);
     if (own.length >= LIMITS.commandDeviceRate)
       return LIMITS.windowMs - (now - Number(own[0].time));
     if (attempts.length >= LIMITS.commandGlobalRate)
       return LIMITS.windowMs - (now - Number(attempts[0].time));
-    // Over-budget requests return above without writing or caching another rejection.
-    this.store.db.prepare("DELETE FROM attempts WHERE time<=?").run(now - LIMITS.windowMs);
-    this.store.db.prepare("INSERT INTO attempts(device,room,time) VALUES(?,'commands',?)").run(device, now);
+    this.store.attempts.push({ device, room: "commands", time: now });
     return 0;
   }
   admit(room: Room, session: Session) {
-    requireValue(session.role !== "display", "forbidden", 403);
-    const db = this.store.db,
-      now = this.clock();
-    db.prepare("DELETE FROM attempts WHERE time<=?").run(now - LIMITS.windowMs);
-    const device = db
-      .prepare("SELECT time FROM attempts WHERE device=? ORDER BY time")
-      .all(session.id);
-    const total = db
-      .prepare("SELECT time FROM attempts WHERE room=? ORDER BY time")
-      .all(room.id);
-    // Rejected fresh attempts count too; retain bounded rows per window to avoid an overload growing the database.
-    const deviceLimited = device.length >= LIMITS.deviceRate,
-      roomLimited = total.length >= LIMITS.roomRate;
-    if (!deviceLimited && !roomLimited)
-      db.prepare("INSERT INTO attempts(device,room,time) VALUES(?,?,?)").run(
-        session.id,
-        room.id,
-        now,
-      );
-    else {
-      // Refresh the oldest applicable attempt: continued abuse keeps the rolling window closed.
-      db.prepare("INSERT INTO attempts(device,room,time) VALUES(?,?,?)").run(
-        session.id,
-        room.id,
-        now,
-      );
-      db.prepare(
-        "DELETE FROM attempts WHERE id IN (SELECT id FROM attempts WHERE room=? ORDER BY time DESC,id DESC LIMIT -1 OFFSET 200)",
-      ).run(room.id);
-      throw new Fault(
-        "rate_limited",
-        429,
-        LIMITS.windowMs -
-          Math.min(
-            deviceLimited ? Number(device[0].time) : now,
-            roomLimited ? Number(total[0].time) : now,
-          ) +
-          now,
-      );
-    }
+    const now = this.clock();
+    this.store.attempts = this.store.attempts.filter(a => a.time > now - LIMITS.windowMs);
+    const device = this.store.attempts.filter(a => a.device === session.id);
+    const total = this.store.attempts.filter(a => a.room === room.id);
+    if (device.length >= LIMITS.deviceRate || total.length >= LIMITS.roomRate)
+      throw new Fault("rate_limited", 429, LIMITS.windowMs - (now - Math.min(device[0]?.time ?? now, total[0]?.time ?? now)));
+    this.store.attempts.push({ device: session.id, room: room.id, time: now });
     requireValue(room.queue.length < room.policy.roomCap, "queue_full", 409);
     if (!this.host(session))
       requireValue(
@@ -341,14 +260,10 @@ export class Rooms {
     const host = this.host(session);
     if (type === "enqueue") {
       requireValue(room.status === "open" || host, "room_locked", 403);
-      let song;
-      if (p.youtube !== undefined) {
-        const videoId = text(p.youtube, 11);
-        requireValue(/^[a-zA-Z0-9_-]{11}$/.test(videoId), "invalid_youtube_id");
-        song = { id: `yt:${videoId}`, title: text(p.title, 200), artist: "YouTube", format: "youtube" as const, videoId };
-        this.store.put("songs", song.id, song);
-      } else song = this.store.get("songs", text(p.songId, 100));
-      requireValue(song, "song_not_found", 404);
+      const videoId = text(p.youtube, 11);
+      requireValue(/^[a-zA-Z0-9_-]{11}$/.test(videoId), "invalid_youtube_id");
+      const song = { id: `yt:${videoId}`, title: text(p.title, 200), artist: "YouTube", format: "youtube" as const, videoId };
+      this.store.put("songs", song.id, song);
       room.queue.push({
         id: randomUUID(),
         songId: song.id,
@@ -360,7 +275,6 @@ export class Rooms {
       return;
     }
     if (type === "cheer") {
-      requireValue(session.role !== "display", "forbidden", 403);
       const message = text(p.message, 120);
       room.cheers = [...(room.cheers || []).filter((c) => this.clock() - c.time < 8000),
         { id: randomUUID(), nickname: session.nickname, message, time: this.clock() }].slice(-12);
@@ -413,13 +327,7 @@ export class Rooms {
         this.next(room);
         break;
       case "seek":
-        requireValue(room.current, "nothing_playing", 409);
-        requireValue(this.store.get("songs", room.current.songId)?.format !== "youtube", "live_separation_not_seekable", 409);
-        room.current.seek = {
-          position: number(p.position, 0, 86_400),
-          id: randomUUID(),
-        };
-        break;
+        throw new Fault("live_separation_not_seekable", 409);
       case "volume":
         room.volume = number(p.value, 0, 1);
         break;
@@ -432,7 +340,6 @@ export class Rooms {
         break;
       case "policy":
         if (p.roomCap !== undefined) {
-          requireValue(session.role === "admin", "forbidden", 403);
           room.policy.roomCap = Math.floor(number(p.roomCap, 1, 1000));
         }
         if (p.guestCap !== undefined)
@@ -448,7 +355,7 @@ export class Rooms {
           .find((s) => s.id === p.deviceId);
         requireValue(
           target &&
-            ["guest", "display"].includes(target.role) &&
+            target.role === "guest" &&
             room.members[target.id],
           "invalid_participant",
         );
@@ -494,39 +401,22 @@ export class Rooms {
   available(room: Room): room is Room & { lease: NonNullable<Room["lease"]> } {
     const lease = room.lease;
     return !!(
-      !room.recoveryRequired &&
       lease &&
       !lease.retired &&
       !lease.releaseRequested &&
-      lease.epoch === this.store.deployment &&
       (this.deadlines.get(lease.generation) || 0) > this.monotonic()
     );
   }
   claim(roomId: string, session: Session) {
     return this.store.transaction(() => {
       const room = this.room(roomId, session);
-      requireValue(
-        this.host(session) || session.role === "display",
-        "forbidden",
-        403,
-      );
-      requireValue(!room.recoveryRequired, "physical_recovery_required", 409);
-      if (room.lease && !room.lease.retired) {
-        room.lease.releaseRequested = true;
-        room.desired = "paused";
-        room.revision++;
-        this.store.put("rooms", room.id, room);
-        return { pending: true };
-      }
-      const releaseToken = secret();
+      requireValue(session.id === room.screenId, "main_screen_required", 403);
+      requireValue(!this.available(room), "screen_already_started", 409);
+      if (room.lease) this.deadlines.delete(room.lease.generation);
       room.lease = {
-        deviceId: session.id,
-        generation: `${this.store.deployment}:${randomUUID()}`,
-        epoch: this.store.deployment,
+        deviceId: session.id, generation: randomUUID(),
         deadline: this.clock() + LIMITS.leaseMs,
-        releaseHash: digest(releaseToken),
-        releaseRequested: false,
-        retired: false,
+        releaseRequested: false, retired: false,
       };
       this.deadlines.set(
         room.lease.generation,
@@ -538,21 +428,12 @@ export class Rooms {
       };
       room.desired = "paused";
       room.observed = "ready";
-      if (room.current) {
-        if (this.store.get("songs", room.current.songId)?.format === "youtube") {
-          // A replacement display opens a new sequential separation stream.
-          room.position = 0;
-          delete room.current.seek;
-        } else {
-          room.current.seek = { position: room.position || 0, id: randomUUID() };
-        }
-      }
+      if (room.current) room.position = 0;
       room.revision++;
       this.store.put("rooms", room.id, room);
       return {
         generation: room.lease.generation,
         leaseMs: LIMITS.leaseMs,
-        releaseToken,
       };
     });
   }
@@ -568,68 +449,28 @@ export class Rooms {
       );
       room.lease.deadline = this.clock() + LIMITS.leaseMs;
       if (room.expires) room.expires = this.clock() + 24 * 60 * 60_000;
-      this.store.put("rooms", room.id, room); // Commit before the grant is returned to the browser.
+      session.expires = this.clock() + 24 * 60 * 60_000;
+      this.store.put("sessions", session.tokenHash, session);
+      if (room.pairing) {
+        for (const id of [digest(room.pairing.code), digest(room.pairing.token)]) {
+          const grant = this.store.get("invites", id);
+          if (grant) { grant.expires = room.expires!; this.store.put("invites", id, grant); }
+        }
+      }
+      this.store.put("rooms", room.id, room);
       this.deadlines.set(generation, this.monotonic() + LIMITS.leaseMs);
       return { generation, leaseMs: LIMITS.leaseMs };
     });
   }
-  release(roomId: string, generation: string, token: unknown) {
-    const room = this.store.get("rooms", roomId);
-    requireValue(
-      room?.lease?.generation === generation &&
-        room.lease.releaseHash === digest(text(token, 128)),
-      "invalid_release",
-      403,
-    );
+  release(roomId: string, session: Session, generation: string) {
+    const room = this.room(roomId, session);
+    requireValue(session.id === room.screenId && room.lease?.generation === generation, "stale_display", 409);
     room.lease.retired = true;
     room.desired = "paused";
     room.observed = "unavailable";
     room.revision++;
     this.store.put("rooms", room.id, room);
     this.deadlines.delete(generation);
-    return room;
-  }
-  retire(roomId: string, session: Session, confirmation: Retirement) {
-    requireValue(session.role === "admin", "forbidden", 403);
-    const room = this.room(roomId, session, { ended: true });
-    requireValue(
-      confirmation?.generation === (room.lease?.generation || "recovery") &&
-        confirmation.outputsPhysicallyIsolated === true &&
-        confirmation.browserTerminatedAndPairingCleared === true &&
-        (!room.recoveryRequired ||
-          confirmation.allPossiblyOutstandingDisplaysIsolated === true),
-      "physical_confirmation_required",
-    );
-    this.store.transaction(() => {
-      for (const device of this.store.all("sessions")) {
-        if (
-          (device.roomId === roomId && device.role === "display") ||
-          device.id === room.lease?.deviceId
-        ) {
-          device.revoked = true;
-          this.store.put("sessions", device.tokenHash, device);
-          delete room.members[device.id];
-        }
-      }
-      if (room.lease) room.lease.retired = true;
-      room.recoveryRequired = false;
-      room.desired = "paused";
-      room.observed = "unavailable";
-      room.revision++;
-      this.store.put("rooms", room.id, room);
-      this.store.db
-        .prepare("INSERT INTO audit(value) VALUES(?)")
-        .run(
-          JSON.stringify({
-            type: "physical_retirement",
-            roomId,
-            administrator: session.id,
-            time: this.clock(),
-            confirmation,
-          }),
-        );
-    });
-    if (room.lease) this.deadlines.delete(room.lease.generation);
     return room;
   }
   telemetry(roomId: string, session: Session, message: Telemetry) {

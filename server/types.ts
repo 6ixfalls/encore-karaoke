@@ -1,12 +1,9 @@
-/** Durable server records. Incoming payloads still require runtime validation. */
-export type Role = "admin" | "host" | "guest" | "display";
+/** Ephemeral room records. Incoming payloads still require runtime validation. */
+export type Role = "host" | "guest";
 export interface Session {
   id: string;
   role: Role;
   nickname: string;
-  csrf: string;
-  epoch: string;
-  principal?: string;
   roomId?: string;
   expires: number;
   tokenHash: string;
@@ -29,9 +26,7 @@ export interface Playback extends Reservation {
 export interface Lease {
   deviceId: string;
   generation: string;
-  epoch: string;
   deadline: number;
-  releaseHash: string;
   releaseRequested: boolean;
   retired: boolean;
 }
@@ -39,7 +34,7 @@ export type PlaybackState = "idle" | "unavailable" | "loading" | "ready" | "play
 export interface Room {
   id: string;
   name: string;
-  ownerPrincipal?: string;
+  screenId: string;
   expires?: number;
   pairing?: { code: string; token: string };
   status: "open" | "locked" | "ended";
@@ -57,13 +52,10 @@ export interface Room {
   members: Record<string, { nickname: string; role: Role }>;
   policy: { roomCap: number; guestCap: number; guestControl: boolean };
   lease: Lease | null;
-  recoveryRequired?: boolean;
 }
 export interface Invitation {
   roomId: string;
-  epoch: string;
   expires: number;
-  kind: "guest" | "display";
   invitation: string;
   code: string;
 }
@@ -71,20 +63,8 @@ export interface Song {
   id: string;
   title: string;
   artist: string;
-  assetId?: string;
-  format: "mp3" | "audio" | "video" | "midi" | "youtube";
-  videoId?: string;
-  cdgId?: string;
-  guideId?: string;
-  referenceId?: string;
-  lyricsId?: string;
-}
-export interface Asset {
-  id: string;
-  relative: string;
-  size: number;
-  mtime: number;
-  type: string;
+  format: "youtube";
+  videoId: string;
 }
 export interface CommandResult {
   commandId: string;
@@ -107,21 +87,12 @@ export interface Telemetry {
   position: number;
   score?: { value: number; samples: number; mode: "guide" | "stability" };
 }
-export interface Retirement {
-  generation: string;
-  outputsPhysicallyIsolated: boolean;
-  browserTerminatedAndPairingCleared: boolean;
-  allPossiblyOutstandingDisplaysIsolated?: boolean;
-}
 export interface Tables {
-  meta: unknown;
   sessions: Session;
   rooms: Room;
   invites: Invitation;
   songs: Song;
-  assets: Asset;
   commands: { fingerprint: string; result: CommandResult; expires: number };
-  audit: unknown;
 }
 export interface ServiceError extends Error {
   code?: string;

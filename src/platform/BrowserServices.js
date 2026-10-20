@@ -1,7 +1,7 @@
 // Explicit browser services: no preload globals, filesystem paths, or loopback URLs.
 export class BrowserServices {
   constructor() {
-    this.csrf = null;
+    this.token = sessionStorage.getItem("encore-participant");
   }
   async request(path, { method = "GET", body, keepalive = false } = {}) {
     const response = await fetch(path, {
@@ -10,7 +10,7 @@ export class BrowserServices {
       keepalive,
       headers: {
         "Content-Type": "application/json",
-        ...(this.csrf ? { "X-CSRF-Token": this.csrf } : {}),
+        ...(this.token ? { "X-Participant-Token": this.token } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -18,18 +18,21 @@ export class BrowserServices {
     if (!response.ok) {
       const error = new Error(
         value.error ||
-          (value.pending ? "display_release_pending" : "request_failed"),
+          "request_failed",
       );
       error.retryAfterMs = value.retryAfterMs;
       error.status = response.status;
       throw error;
     }
-    if (value.csrf) this.csrf = value.csrf;
+    if (value.token) {
+      this.token = value.token;
+      sessionStorage.setItem("encore-participant", value.token);
+    }
     return value;
   }
-  media(assetId, roomId) {
-    if (!/^[a-f0-9]{64}$/.test(assetId)) throw new Error("invalid_asset_id");
-    return `/media/${assetId}?roomId=${encodeURIComponent(roomId)}`;
+  clear() {
+    this.token = null;
+    sessionStorage.removeItem("encore-participant");
   }
   command(roomId, type, payload = {}, expectedRevision) {
     return this.request(`/api/rooms/${roomId}/commands`, {

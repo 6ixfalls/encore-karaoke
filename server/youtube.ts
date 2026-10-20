@@ -28,7 +28,7 @@ export class YouTube {
   private async json(args: string[], signal?: AbortSignal) {
     requireValue(this.active < 2, "youtube_busy", 503);
     this.active++;
-    try { return await this.run(this.binary, ["--ignore-config", "--no-playlist", "--no-warnings", "--js-runtimes", "node", ...args], signal); }
+    try { return await this.run(this.binary, ["--ignore-config", "--no-cache-dir", "--no-playlist", "--no-warnings", "--js-runtimes", "node", ...args], signal); }
     finally { this.active--; }
   }
   async search(query: string) {

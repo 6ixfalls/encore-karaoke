@@ -11,7 +11,7 @@ body.tv #welcome, body.tv #lobby { padding: 40px; }
 body.tv #message { position: fixed; top: 12px; left: 20%; right: 20%; z-index: 100; }
 #tv-appliance { position: fixed; inset: 0; color: white; background: #080810; }
 #tv-appliance .stage { position: absolute; inset: 0; border: 0; border-radius: 0; padding: 0; margin: 0; background: transparent; }
-#tv-appliance #local-media, #tv-appliance #cdg-player { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; object-fit: contain; }
+#tv-appliance #local-media { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; object-fit: contain; }
 #tv-appliance .player-ui { display: flex; position: absolute; inset: auto 0 12%; flex-direction: column; align-items: center; z-index: 12; pointer-events: none; }
 #tv-appliance #lyrics { font-size: clamp(32px, 4vw, 68px); color: #fff; text-shadow: 2px 2px 4px #000, -1px -1px 2px #000; margin: 0; }
 #tv-appliance #next-lyrics { color: #ddd; text-shadow: 2px 2px 4px #000; }
@@ -33,7 +33,7 @@ body.tv #message { position: fixed; top: 12px; left: 20%; right: 20%; z-index: 1
 #tv-library .columns { grid-template-columns: 1fr 1fr; }
 #tv-appliance .info-bar { position: absolute; bottom: 0; width: 100%; display: flex; padding: 12px 32px; gap: 24px; background: #000b; }
 #tv-appliance .qr-image-wrapper { flex-direction: column; }
-body.tv:has(#room:not([hidden])) #host-tools, body.tv:has(#room:not([hidden])) #admin-tools { display: none; }
+body.tv:has(#room:not([hidden])) #host-tools { display: none; }
 #tv-appliance .bottom-actions { position: absolute; bottom: 5.5rem; left: 3rem; margin: 0; }
 #tv-appliance .standby-screen { bottom: 24%; }
 #tv-appliance .standby-text { color: white; }

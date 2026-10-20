@@ -29,8 +29,6 @@ export function configuration(env: NodeJS.ProcessEnv = process.env) {
     secure: publicUrl.protocol === "https:",
     port: Number(env.PORT || 3000),
     host: env.LISTEN_HOST || "0.0.0.0",
-    data: path.resolve(env.DATA_DIR || "data"),
-    library: path.resolve(env.LIBRARY_DIR || "library"),
     web: path.resolve(env.WEB_DIR || "dist/web"),
     maxTransfers: 16,
     ytDlp: env.YT_DLP_PATH || "yt-dlp",

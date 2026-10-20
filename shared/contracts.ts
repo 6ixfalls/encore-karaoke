@@ -1,5 +1,4 @@
 export const PROTOCOL_VERSION = 1;
-export const SCHEMA_VERSION = 2;
 export const LIMITS = Object.freeze({
   room: 100,
   guest: 5,

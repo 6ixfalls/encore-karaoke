@@ -94,7 +94,7 @@ function fixture(t) {
   const service = {
     request: async (...args) => {
       calls.push(args);
-      return {};
+      return { id: "job", media: "/media/separation/job", complete: true };
     },
     media: (id) => `/media/${id}`,
   };
@@ -125,6 +125,7 @@ function fixture(t) {
     clearInterval(player.lyricsTimer);
     clearInterval(player.renewTimer);
     clearTimeout(player.expiryTimer);
+    clearTimeout(player.separationTimer);
     Object.assign(globalThis, original);
   });
   return { player, service, calls, reports, errors, rendered, room };
@@ -142,7 +143,7 @@ test("fractional lyric transitions render between telemetry reports", async t =>
   const { player, service, room, reports, rendered } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "asset" });
+  service.request = async () => ({ id: "asset", media: "/media/asset", complete: true });
   await player.update({ ...room, desired: "playing", current: { playbackId: "track", songId: "song" } });
   player.lines = [
     { time: 1.05, text: "First" },
@@ -205,7 +206,7 @@ test("periodic telemetry never confirms a song before playing and preserves buff
   const { player, service, room, reports } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "asset" });
+  service.request = async () => ({ id: "asset", media: "/media/asset", complete: true });
   // play() clears paused before enough data arrives to emit playing.
   player.audio.play = async () => { player.audio.paused = false; };
   await player.update({ ...room, desired: "playing", current: { playbackId: "track", songId: "song" } });
@@ -225,7 +226,7 @@ test("a superseded play rejection cannot fail the replacement track or display",
       const { player, service, room, reports, errors } = fixture(t);
       await player.initialize();
       player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-      service.request = async () => ({ assetId: "asset" });
+      service.request = async () => ({ id: "asset", media: "/media/asset", complete: true });
       let rejectPlay;
       const starting = deferred();
       player.audio.play = () => {
@@ -260,7 +261,7 @@ test("a current play rejection still reports the failed track", async t => {
   const { player, service, room, reports, errors } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "asset" });
+  service.request = async () => ({ id: "asset", media: "/media/asset", complete: true });
   const error = new Error("Playback unavailable");
   player.audio.play = async () => { throw error; };
   await player.update({ ...room, desired: "playing", current: { playbackId: "track", songId: "song" } });
@@ -275,7 +276,7 @@ test("a media error reloads the resource only after explicit resume", async t =>
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
   let lookups = 0;
-  service.request = async () => { lookups++; return { assetId: "asset" }; };
+  service.request = async url => { if (url.endsWith("/separation")) lookups++; return { id: "asset", media: "/media/asset", complete: true }; };
   const playing = { ...room, revision: 1, desired: "playing", current: { playbackId: "track", songId: "song" } };
   await player.update(playing);
   player.audio.dispatchEvent(new Event("error"));
@@ -290,26 +291,22 @@ test("a media error reloads the resource only after explicit resume", async t =>
   assert.equal(player.audio.paused, false);
 });
 
-test("a media error during lyrics loading cancels the pending load", async t => {
+test("a media error during separation startup cancels the pending stream", async t => {
   const { player, service, room, reports } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "asset", lyricsId: "lyrics" });
-  const lyrics = deferred();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => lyrics.promise;
-  t.after(() => { globalThis.fetch = originalFetch; });
+  const separation = deferred();
+  service.request = () => separation.promise;
   const pending = player.update({ ...room, desired: "playing", current: { playbackId: "track", songId: "song" } });
-  await Promise.resolve();
   player.audio.dispatchEvent(new Event("error"));
-  lyrics.resolve({ ok: true, text: async () => "[00:01]Line" });
+  separation.resolve({ id: "old-job", media: "/media/separation/old-job", complete: true });
   await pending;
   assert.equal(player.loaded, null);
   assert.equal(player.audio.paused, true);
   assert.equal(reports.at(-1).state, "failed");
 });
 
-test("output starts closed, every MP3 route uses the gate, and volume updates preserve its scheduled cutoff", async (t) => {
+test("output starts closed, YouTube output uses the gate, and volume updates preserve its scheduled cutoff", async (t) => {
   const { player, room } = fixture(t);
   await player.initialize();
   assert.equal(player.gate.gain.value, 0);
@@ -354,7 +351,7 @@ test("a late renewal response cannot reopen output after disconnect", async (t) 
   assert.equal(player.audio.paused, true);
 });
 
-test("a delayed song lookup cannot play a superseded reservation", async (t) => {
+test("a delayed separation cannot play a superseded reservation", async (t) => {
   const { player, service, room } = fixture(t);
   await player.initialize();
   player.arm(
@@ -362,8 +359,8 @@ test("a delayed song lookup cannot play a superseded reservation", async (t) => 
     performance.now(),
   );
   const old = deferred();
-  service.request = async (url) =>
-    url.includes("song-old") ? old.promise : { assetId: "new-asset" };
+  service.request = async (_url, options) =>
+    options?.body?.playbackId === "old" ? old.promise : { id: "new-asset", media: "/media/new-asset", complete: true };
   const before = player.update({
     ...room,
     desired: "playing",
@@ -374,18 +371,18 @@ test("a delayed song lookup cannot play a superseded reservation", async (t) => 
     desired: "playing",
     current: { playbackId: "new", songId: "song-new" },
   });
-  old.resolve({ assetId: "old-asset" });
+  old.resolve({ id: "old-asset", media: "/media/old-asset", complete: true });
   await before;
   assert.equal(player.audio.src, "/media/new-asset");
   assert.equal(player.loaded, "new");
   assert.equal(player.audio.playCount, 1);
 });
 
-test("a failed next-song lookup clears old media and retries only on resume", async (t) => {
+test("a failed next-separation startup clears old media and retries only on resume", async (t) => {
   const { player, service, room, reports } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "first-asset" });
+  service.request = async () => ({ id: "first-asset", media: "/media/first-asset", complete: true });
   await player.update({
     ...room, revision: 1, desired: "playing",
     current: { playbackId: "first", songId: "first" },
@@ -402,7 +399,7 @@ test("a failed next-song lookup clears old media and retries only on resume", as
   assert.equal(reports.at(-1).state, "failed");
   assert.equal(reports.at(-1).playbackId, "second");
   let retries = 0;
-  service.request = async () => { retries++; return { assetId: "second-asset" }; };
+  service.request = async url => { if (url.endsWith("/separation")) retries++; return { id: "second-asset", media: "/media/second-asset", complete: true }; };
   await player.update({ ...next, revision: 3, desired: "paused" });
   assert.equal(retries, 0);
   await player.update({ ...next, revision: 4 });
@@ -415,7 +412,7 @@ test("a stale track acknowledgment preserves playback but a stale lease retires 
   const { player, service, room, reports, errors } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async () => ({ assetId: "asset" });
+  service.request = async () => ({ id: "asset", media: "/media/asset", complete: true });
   const playing = {
     ...room, revision: 1, desired: "playing",
     current: { playbackId: "first", songId: "song" },
@@ -452,7 +449,7 @@ test("an acknowledgment from an old generation cannot stop its replacement", asy
 test("an authorized reconnect snapshot stays silent until a new lease renewal is accepted", async t => {
   const { player, service, room } = fixture(t);
   await player.initialize(); player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
-  service.request = async url => url.includes("/renew") ? { generation: "generation-1", leaseMs: 10_000 } : { assetId: "asset" };
+  service.request = async url => url.includes("/renew") ? { generation: "generation-1", leaseMs: 10_000 } : { id: "asset", media: "/media/asset", complete: true };
   const playing = { ...room, revision: 2, desired: "playing", current: { playbackId: "current", songId: "song" } };
   await player.update(playing); assert.equal(player.audio.playCount, 1);
   player.disconnected(); player.connected = true;
@@ -471,51 +468,32 @@ test("disconnecting during song loading permits a fresh load after authorized re
   const lookup = deferred(); service.request = () => lookup.promise;
   const playing = { ...room, desired: "playing", current: { playbackId: "current", songId: "song" } };
   const old = player.update(playing); player.disconnected();
-  lookup.resolve({ assetId: "old" }); await old;
+  lookup.resolve({ id: "old", media: "/media/old", complete: true }); await old;
   player.connected = true;
-  service.request = async url => url.includes("/renew") ? { generation: "generation-1", leaseMs: 10_000 } : { assetId: "fresh" };
+  service.request = async url => url.includes("/renew") ? { generation: "generation-1", leaseMs: 10_000 } : { id: "fresh", media: "/media/fresh", complete: true };
   await player.renew(); await player.update(playing);
   assert.equal(player.audio.src, "/media/fresh"); assert.equal(player.audio.playCount, 1);
 });
 
-test("release permanently retires output before acknowledgment and retries a failed release without reopening", async (t) => {
+test("stopping mutes immediately even when the ephemeral server has gone away", async t => {
   const { player, service, calls } = fixture(t);
   await player.initialize();
-  player.arm(
-    { generation: "generation-1", leaseMs: 10_000 },
-    performance.now(),
-  );
-  player.releaseToken = "secret";
+  player.arm({ generation: "generation-1", leaseMs: 10_000 }, performance.now());
   player.audio.paused = false;
-  let attempted = false;
   service.request = async (url, options) => {
-    attempted = true;
     assert.equal(player.generation, null);
     assert.equal(player.audio.paused, true);
-    assert.equal(player.audio.src, "");
     assert.equal(player.gate.gain.events.at(-1).value, 0);
     assert.equal(player.context.state, "suspended");
-    calls.push([url, options]);
-    throw new Error("disconnected");
+    assert.equal(url, "/api/rooms/room-1/display/stop");
+    assert.equal(options.body.generation, "generation-1");
+    throw Object.assign(new Error("room_not_found"), { status: 404 });
   };
-  const stopping = player.stop();
-  assert.equal(player.retired.has("generation-1"), true);
-  assert.equal(attempted, false);
-  await assert.rejects(stopping, /disconnected/);
-  assert.equal(player.pendingRelease.generation, "generation-1");
-  await player.context.resume();
-  assert.throws(
-    () =>
-      player.arm(
-        { generation: "generation-1", leaseMs: 10_000 },
-        performance.now(),
-      ),
-    /stale_display/,
-  );
-  service.request = async () => ({ ok: true });
-  await player.releasePending();
-  assert.equal(player.pendingRelease, null);
+  await player.stop();
+  assert.equal(player.pendingRelease, undefined);
   assert.deepEqual(calls.at(-1), ["released"]);
+  await player.context.resume();
+  assert.throws(() => player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now()), /stale_display/);
 });
 
 test("lease suspension never resumes a retired generation when the audio clock was stopped", async (t) => {
@@ -525,7 +503,6 @@ test("lease suspension never resumes a retired generation when the audio clock w
     { generation: "generation-1", leaseMs: 10_000 },
     performance.now(),
   );
-  player.releaseToken = "secret";
   await player.context.suspend();
   if (player.stopping) await player.stopping;
   await player.context.resume();
@@ -546,8 +523,7 @@ test("YouTube streams use the native media element and the existing fenced audio
   const { player, service, room } = fixture(t);
   await player.initialize();
   player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
-  service.request = async (path) => path.includes("/api/library/songs/") ?
-    { format: "youtube", videoId: "M7lc1UVf-VE" } : path.endsWith("/separation") ?
+  service.request = async (path) => path.endsWith("/separation") ?
       { id: "job", media: `/media/separation/job?roomId=${room.id}` } : { complete: true };
   await player.update({ ...room, desired: "playing", current: { playbackId: "video", songId: "yt:M7lc1UVf-VE" } });
   assert.equal(player.audio, player.localMedia);

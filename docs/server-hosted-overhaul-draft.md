@@ -1,3 +1,5 @@
+> Historical design draft. Persistent storage, local libraries, account roles and display takeover in this document have been superseded by the stateless, single-main-screen implementation. See [current implementation](server-hosted-implementation.md).
+
 # Encore Karaoke: server-hosted overhaul
 
 Status: architecture and delivery draft, October 18, 2026. No runtime changes are included.

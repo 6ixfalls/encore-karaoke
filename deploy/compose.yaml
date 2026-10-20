@@ -10,10 +10,6 @@ services:
       FFMPEG_VIDEO_MODE: ${FFMPEG_VIDEO_MODE:-copy}
       FFMPEG_GPU: ${FFMPEG_GPU:-0}
       TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
-    volumes:
-      - encore-data:/data
-      - encore-cache:/cache
-      - ${LIBRARY_DIR:?Set an absolute library path}:/library:ro
     read_only: true
     tmpfs: ["/tmp:size=64m,noexec,nosuid"]
     security_opt: [no-new-privileges:true]
@@ -39,8 +35,6 @@ services:
       encore:
         condition: service_healthy
 volumes:
-  encore-data:
-  encore-cache:
   caddy-data:
   caddy-config:
 networks:

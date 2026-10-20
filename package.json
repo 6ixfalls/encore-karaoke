@@ -1,7 +1,7 @@
 {
   "name": "encore-karaoke",
   "version": "1.15.0",
-  "description": "Self-hosted karaoke rooms with a browser display and same-origin phone controllers.",
+  "description": "Stateless karaoke rooms with one main browser screen and code/QR phone controllers.",
   "type": "module",
   "scripts": {
     "build": "npm run build:server && node build-server.mjs",
@@ -12,8 +12,6 @@
     "test": "npm run lint && npm run test:server",
     "test:server": "npm run build:server && node --test tests/server/*.test.mjs",
     "lint": "eslint server shared src/hosted src/platform tests/server build-server.mjs eslint.config.js",
-    "backup:server": "node dist/server/operations.js backup",
-    "restore:server": "node dist/server/operations.js restore",
     "test:types": "tsc -p tsconfig.server.json --noEmit"
   },
   "repository": {

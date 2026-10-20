@@ -4,8 +4,6 @@ import type { Session, Command, Telemetry } from "./types.js";
 import { serviceError } from "./types.js";
 import type { Request, Response, NextFunction } from "express";
 import type { Socket } from "socket.io";
-import type { FileHandle } from "node:fs/promises";
-import type { ReadStream } from "node:fs";
 
 declare module "express-serve-static-core" {
   interface Request {
@@ -21,19 +19,15 @@ import { Separations } from "./separation.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
-import { Auth } from "./auth.js";
-import { secret } from "./store.js";
+import { Participants } from "./participants.js";
 import { Rooms } from "./rooms.js";
-import { Library } from "./library.js";
-import { Fault, requireValue, text, number } from "../shared/contracts.js";
+import { Fault, requireValue, text } from "../shared/contracts.js";
 
 export function createApplication(store: Store, config: Configuration) {
   const app = express(),
     http = createServer(app);
-  const auth = new Auth(store, config),
-    rooms = new Rooms(store),
-    library = new Library(store, config.library);
-  const authenticated = (req: Request): Session => {
+  const participants = new Participants(store, config), rooms = new Rooms(store);
+  const participant = (req: Request): Session => {
     requireValue(req.session, "unauthorized", 401);
     return req.session;
   };
@@ -56,32 +50,31 @@ export function createApplication(store: Store, config: Configuration) {
   app.use(express.json({ limit: "16kb", strict: true }));
   app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
   app.get("/readyz", (_req, res) => {
-    store.db.prepare("SELECT 1").get();
-    res.json({ status: "ready", library: library.status });
+    res.json({ status: "ready" });
   });
   app.use((req, res, next) => {
-    req.session = auth.session(req.headers.cookie);
+    req.session = participants.session(req.headers["x-participant-token"] || (req.path.startsWith("/media/") ? req.query.participant : undefined));
     if (req.path.startsWith("/api/") || req.path.startsWith("/media/"))
       res.set("Cache-Control", "no-store");
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
-      auth.mutation(req);
+      participants.mutation(req);
       requireValue(req.body && typeof req.body === "object" && !Array.isArray(req.body));
     }
     next();
   });
   // Every public TV receives an independent owner; no shared host credential.
   app.post("/api/launch", (req, res) => {
-    auth.throttle(`launch:${req.ip}`, 10);
-    auth.throttle("launch:global", 100);
+    participants.throttle(`launch:${req.ip}`, 10);
+    participants.throttle("launch:global", 100);
     const previous = req.session;
     if (previous && rooms.host(previous)) {
-      const existing = store.all("rooms").find((room) => room.status !== "ended" && room.ownerPrincipal === previous.principal);
+      const existing = store.all("rooms").find((room) => room.status !== "ended" && room.screenId === previous.id);
       if (existing) {
-        res.json({ id: previous.id, role: previous.role, csrf: previous.csrf, roomId: existing.id });
+        res.json({ id: previous.id, role: previous.role, roomId: existing.id });
         return;
       }
     }
-    const created = auth.create("host", "Karaoke TV", `anonymous:${secret()}`);
+    const created = participants.create("host", "Karaoke TV");
     try {
       const room = rooms.create(created.session, "Encore Karaoke");
       room.policy.guestControl = true;
@@ -89,20 +82,17 @@ export function createApplication(store: Store, config: Configuration) {
       store.put("rooms", room.id, room);
       created.session.roomId = room.id;
       store.put("sessions", created.session.tokenHash, created.session);
-      res.status(201).set("Set-Cookie", created.cookie).json({ id: created.session.id, role: "host", csrf: created.session.csrf, roomId: room.id });
+      res.status(201).json({ id: created.session.id, role: "host", token: created.token, roomId: room.id });
     } catch (error) {
       store.delete("sessions", created.session.tokenHash);
       throw error;
     }
   });
-  app.post("/api/login", (_req, res) => {
-    res.status(410).json({ error: "key_login_removed" });
-  });
   app.post("/api/join", (req, res) => {
-    auth.throttle(`join:${req.ip}`, 30);
-    auth.throttle("join:global", 300);
-    // Create the cookie only after checking the grant; failed joins leave no session records.
-    const created = auth.create("guest", text(req.body.nickname, 40));
+    participants.throttle(`join:${req.ip}`, 30);
+    participants.throttle("join:global", 300);
+    // Failed joins leave no participant records.
+    const created = participants.create("guest", text(req.body.nickname, 40));
     let room;
     try {
       room = rooms.join(req.body.invitation, created.session);
@@ -110,129 +100,78 @@ export function createApplication(store: Store, config: Configuration) {
       store.delete("sessions", created.session.tokenHash);
       throw error;
     }
-    res
-      .set("Set-Cookie", created.cookie)
-      .json({
-        id: created.session.id,
-        role: created.session.role,
-        csrf: created.session.csrf,
-        roomId: room.id,
-      });
+    res.json({
+      id: created.session.id,
+      role: created.session.role,
+      token: created.token,
+      roomId: room.id,
+    });
     publish(room.id);
   });
   app.use("/api", (req, _res, next) => {
-    authenticated(req);
+    participant(req);
     next();
   });
   app.get("/api/session", (req, res) => {
-    const s = authenticated(req);
+    const s = participant(req);
     res.json({
       id: s.id,
       role: s.role,
-      csrf: s.csrf,
       roomId: s.roomId,
       rooms: store
         .all("rooms")
         .filter(
           (r) =>
             r.status !== "ended" &&
-            (s.role === "admin" ||
-              r.members[s.id] ||
-              (rooms.host(s) &&
-                s.principal &&
-                r.ownerPrincipal === s.principal)),
+            r.members[s.id],
         )
         .map((r) => ({ id: r.id, name: r.name })),
     });
   });
   app.post("/api/logout", (req, res) => {
-    authenticated(req).revoked = true;
-    store.put("sessions", authenticated(req).tokenHash, authenticated(req));
-    res
-      .set(
-        "Set-Cookie",
-        `encore_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${config.secure ? "; Secure" : ""}`,
-      )
-      .json({ ok: true });
-    for (const r of store.all("rooms").filter((r) => r.members[authenticated(req).id])) {
-      delete r.members[authenticated(req).id];
+    participant(req).revoked = true;
+    store.put("sessions", participant(req).tokenHash, participant(req));
+    res.json({ ok: true });
+    for (const r of store.all("rooms").filter((r) => r.members[participant(req).id])) {
+      delete r.members[participant(req).id];
       r.revision++;
       store.put("rooms", r.id, r);
       publish(r.id);
     }
   });
-  app.post("/api/rooms", (req, res) =>
-    res
-      .status(201)
-      .json(
-        rooms.snapshot(rooms.create(authenticated(req), req.body.name), authenticated(req)),
-      ),
-  );
   app.get("/api/rooms/:roomId", (req, res) =>
     res.json(
-      rooms.snapshot(rooms.room(req.params.roomId, authenticated(req)), authenticated(req)),
+      rooms.snapshot(rooms.room(req.params.roomId, participant(req)), participant(req)),
     ),
   );
   app.post("/api/rooms/:roomId/pairing", async (req, res) => {
-    const grant = rooms.pairing(req.params.roomId, authenticated(req));
+    const grant = rooms.pairing(req.params.roomId, participant(req));
     const url = `${config.origin}/control#invite=${grant.invitation}`;
     res.json({ ...grant, url, qr: await QRCode.toDataURL(url, { margin: 2, width: 256 }) });
   });
-  app.post("/api/rooms/:roomId/invitations", async (req, res) => {
-    const grant = rooms.invite(req.params.roomId, authenticated(req), req.body.kind);
-    // Fragment secrets never enter the access log or the Referer header.
-    const url = `${config.origin}/${req.body.kind === "display" ? "tv" : "control"}#invite=${grant.invitation}`;
-    res.json({
-      ...grant,
-      url,
-      qr: await QRCode.toDataURL(url, { margin: 2, width: 256 }),
-    });
-  });
   app.post("/api/rooms/:roomId/commands", (req, res) => {
-    const ack = rooms.command(req.params.roomId, authenticated(req), req.body);
+    const ack = rooms.command(req.params.roomId, participant(req), req.body);
     if (ack.retryAfterMs)
       res.set("Retry-After", String(Math.ceil(ack.retryAfterMs / 1000)));
     res.status(ack.accepted ? 200 : ack.status ?? 400).json(ack);
     publish(req.params.roomId);
   });
   app.post("/api/rooms/:roomId/display/claim", (req, res) => {
-    const grant = rooms.claim(req.params.roomId, authenticated(req));
-    res.status(grant.pending ? 409 : 200).json(grant);
+    const grant = rooms.claim(req.params.roomId, participant(req));
+    res.json(grant);
     publish(req.params.roomId);
   });
   app.post("/api/rooms/:roomId/display/renew", (req, res) =>
-    res.json(rooms.renew(req.params.roomId, authenticated(req), req.body.generation)),
+    res.json(rooms.renew(req.params.roomId, participant(req), req.body.generation)),
   );
-  app.post("/api/admin/rooms/:roomId/retire", (req, res) => {
-    const room = rooms.retire(req.params.roomId, authenticated(req), req.body);
-    res.json({ ok: true });
-    publish(room.id);
-  });
-  app.post("/api/admin/library/rescan", (req, res) => {
-    requireValue(authenticated(req).role === "admin", "forbidden", 403);
-    requireValue(!library.scanning, "scan_in_progress", 409);
-    library.scan().catch(() => {});
-    res.status(202).json({ state: "scanning" });
-  });
-  app.get("/api/admin/library", (req, res) => {
-    requireValue(authenticated(req).role === "admin", "forbidden", 403);
-    res.json(library.status);
-  });
-  app.get("/api/library/search", (req, res) => {
-    rooms.room(String(req.query.roomId || ""), authenticated(req));
-    const q = req.query.q || "";
-    requireValue(typeof q === "string" && q.length <= 200);
-    const offset = number(Number(req.query.offset || 0), 0, 100_000);
-    res.json(library.search(q, Math.floor(offset)));
-  });
   app.get("/api/youtube/search", async (req, res) => {
-    rooms.room(String(req.query.roomId || ""), authenticated(req));
-    auth.throttle(`youtube:${authenticated(req).id}`, 10);
-    auth.throttle("youtube:global", 100);
+    rooms.room(String(req.query.roomId || ""), participant(req));
+    participants.throttle(`youtube:${participant(req).id}`, 10);
+    participants.throttle("youtube:global", 100);
     res.json({ items: await youtube.search(text(req.query.q, 200)) });
   });
   app.post("/api/rooms/:roomId/separation", async (req, res) => {
-    const session = authenticated(req), room = rooms.room(req.params.roomId, session);
+    const session = participant(req), room = rooms.room(req.params.roomId, session);
     requireValue(room.lease?.deviceId === session.id && rooms.available(room) && !room.lease.releaseRequested, "display_required", 403);
     requireValue(room.current && room.current.playbackId === req.body.playbackId, "stale_playback", 409);
     const song = store.get("songs", room.current.songId);
@@ -240,31 +179,31 @@ export function createApplication(store: Store, config: Configuration) {
     const playbackId = room.current.playbackId, generation = room.lease.generation;
     const current = () => {
       const active = store.get("rooms", room.id);
-      return !!auth.session(req.headers.cookie) && !!active && active.status !== "ended" &&
+      return !!participants.session(req.headers["x-participant-token"]) && !!active && active.status !== "ended" &&
         active.current?.playbackId === playbackId && active.lease?.generation === generation &&
         active.lease?.deviceId === session.id && !active.lease?.releaseRequested && rooms.available(active);
     };
     const job = await separations.create(room.id, playbackId, session.id, song.videoId, current);
-    res.status(201).json({ id: job.id, media: `/media/separation/${job.id}?roomId=${room.id}` });
+    res.status(201).json({ id: job.id, media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
   });
   app.get("/api/rooms/:roomId/separation/:id", (req, res) => {
-    const session = authenticated(req);
+    const session = participant(req);
     rooms.room(req.params.roomId, session);
     const job = separations.get(req.params.id, req.params.roomId, session.id);
     res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete });
   });
   app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {
-    separations.stopOwned(req.params.id, req.params.roomId, authenticated(req).id);
+    separations.stopOwned(req.params.id, req.params.roomId, participant(req).id);
     res.json({ ok: true });
   });
   app.head("/media/separation/:id", (req, res) => {
-    const session = authenticated(req), roomId = String(req.query.roomId || "");
+    const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
     separations.get(req.params.id, roomId, session.id);
     res.set({ "Content-Type": "video/mp4", "Cache-Control": "no-store", "Accept-Ranges": "none" }).end();
   });
   app.get("/media/separation/:id", (req, res) => {
-    const session = authenticated(req), roomId = String(req.query.roomId || "");
+    const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
     const job = separations.get(req.params.id, roomId, session.id);
     requireValue(!job.claimed, "separation_stream_already_open", 409);
@@ -276,7 +215,7 @@ export function createApplication(store: Store, config: Configuration) {
     job.output.pipe(res);
   });
   app.get("/media/youtube/:id", async (req, res) => {
-    const session = authenticated(req);
+    const session = participant(req);
     rooms.room(String(req.query.roomId || ""), session);
     requireValue(/^[\w-]{11}$/.test(req.params.id), "invalid_youtube_id");
     requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
@@ -309,109 +248,10 @@ export function createApplication(store: Store, config: Configuration) {
     }
   });
 
-  app.get("/api/library/songs/:id", (req, res) => {
-    rooms.room(String(req.query.roomId || ""), authenticated(req));
-    const song = store.get("songs", req.params.id);
-    requireValue(song, "song_not_found", 404);
-    const referenceId = song.format === "youtube" && song.videoId ? library.vocalReference(song.videoId) : song.referenceId;
-    const reference = referenceId ? store.get("assets", referenceId) : undefined;
-    res.json({ ...song, referenceId, referenceVersion: reference ? `${reference.size}:${reference.mtime}` : undefined });
-  });
-  // A narrowly scoped bearer token can retire an old generation after authentication-epoch rotation.
-  // It can never acquire a session, renew a lease, or control the room.
-  app.post("/display-release/:roomId", (req, res) => {
-    const room = rooms.release(
-      req.params.roomId,
-      req.body.generation,
-      req.body.releaseToken,
-    );
+  app.post("/api/rooms/:roomId/display/stop", (req, res) => {
+    const room = rooms.release(req.params.roomId, participant(req), req.body.generation);
     res.json({ ok: true });
     publish(room.id);
-  });
-  app.get("/media/:id", async (req, res) => {
-    authenticated(req);
-    rooms.room(String(req.query.roomId || ""), authenticated(req));
-    requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
-    transfers++;
-    let handle: FileHandle | undefined;
-    let stream: ReadStream | undefined;
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      transfers--;
-      if (stream) stream.destroy();
-      else if (handle) handle.close().catch(() => {});
-    };
-    res.once("close", finish);
-    try {
-      const opened = await library.open(req.params.id);
-      handle = opened.handle;
-      if (finished) {
-        await handle.close();
-        return;
-      }
-      const { stat, asset } = opened;
-      const etag = `"${stat.size}-${stat.mtimeMs}"`;
-      res.set({
-        "Content-Type": asset.type,
-        "Accept-Ranges": "bytes",
-        ETag: etag,
-        "Last-Modified": stat.mtime.toUTCString(),
-        "Cache-Control": "private, no-cache",
-      });
-      if (req.headers["if-none-match"] === etag) {
-        res.status(304).end();
-        finish();
-        return;
-      }
-      let start = 0,
-        end = stat.size - 1;
-      const range = req.headers.range;
-      if (
-        range &&
-        (!req.headers["if-range"] ||
-          req.headers["if-range"] === etag ||
-          req.headers["if-range"] === stat.mtime.toUTCString())
-      ) {
-        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-        if (!match || (!match[1] && !match[2])) {
-          res.set("Content-Range", `bytes */${stat.size}`).status(416).end();
-          finish();
-          return;
-        }
-        if (!match[1]) start = Math.max(0, stat.size - Number(match[2]));
-        else {
-          start = Number(match[1]);
-          if (match[2]) end = Math.min(end, Number(match[2]));
-        }
-        if (
-          start > end ||
-          start >= stat.size ||
-          !Number.isSafeInteger(start) ||
-          !Number.isSafeInteger(end)
-        ) {
-          res.set("Content-Range", `bytes */${stat.size}`).status(416).end();
-          finish();
-          return;
-        }
-        res
-          .status(206)
-          .set("Content-Range", `bytes ${start}-${end}/${stat.size}`);
-      }
-      res.set("Content-Length", String(Math.max(0, end - start + 1)));
-      if (req.method === "HEAD" || stat.size === 0) {
-        res.end();
-        finish();
-        return;
-      }
-      stream = handle.createReadStream({ start, end, autoClose: true });
-      stream.on("error", () => res.destroy());
-      stream.pipe(res);
-    } catch (error) {
-      finish();
-      throw error;
-    }
   });
   app.get(["/tv", "/control"], (_req, res) => res.sendFile("app.html", { root: config.web }));
   app.use(
@@ -455,15 +295,13 @@ export function createApplication(store: Store, config: Configuration) {
     allowRequest: (req, callback) =>
       callback(
         null,
-        req.headers.origin === config.origin &&
-          !!auth.session(req.headers.cookie),
+        req.headers.origin === config.origin,
       ),
   });
   io.use((socket, next) => {
-    const session = auth.session(socket.request.headers.cookie);
+    const session = participants.session(socket.handshake.auth?.token);
     if (
       !session ||
-      socket.handshake.auth?.csrf !== session.csrf ||
       socket.handshake.headers.origin !== config.origin
     )
       return next(new Error("unauthorized"));
@@ -471,16 +309,16 @@ export function createApplication(store: Store, config: Configuration) {
     next();
   });
   const socketSession = (socket: Socket) => {
-    const s = auth.session(socket.request.headers.cookie);
+    const s = participants.session(socket.handshake.auth?.token);
     requireValue(s && s.id === socket.data.sessionId, "unauthorized", 401);
-    auth.throttle(`socket:${s.id}`, 600);
+    participants.throttle(`socket:${s.id}`, 600);
     return s;
   };
   function publish(roomId: string) {
     for (const socket of io.sockets.sockets.values()) {
       if (socket.data.roomId !== roomId) continue;
       try {
-        const s = auth.session(socket.request.headers.cookie);
+        const s = participants.session(socket.handshake.auth?.token);
         socket.emit(
           "room:state",
           rooms.snapshot(rooms.room(roomId, s, { ended: true }), s!),
@@ -563,7 +401,6 @@ export function createApplication(store: Store, config: Configuration) {
     handle("mic:close", () => { closeMicrophone(); return { accepted: true }; });
     socket.on("disconnect", closeMicrophone);
   });
-  let sweepCount = 0;
   const sweep = setInterval(() => {
     separations.sweep();
     for (const room of store.all("rooms")) {
@@ -589,22 +426,35 @@ export function createApplication(store: Store, config: Configuration) {
         publish(room.id);
       }
     }
-    if (++sweepCount % 60 !== 0) return;
-    for (const table of ["sessions", "commands", "invites"])
-      store.db
-        .prepare(
-          `DELETE FROM ${table} WHERE json_extract(value,'$.expires') < ?`,
-        )
-        .run(Date.now());
+    const now = Date.now();
+    store.sweep(now);
+    for (const room of store.all("rooms")) {
+      if (room.status !== "ended") continue;
+      publish(room.id);
+      if (room.lease) rooms.deadlines.delete(room.lease.generation);
+      for (const session of store.all("sessions"))
+        if (session.roomId === room.id) store.delete("sessions", session.tokenHash);
+      for (const invite of store.all("invites"))
+        if (invite.roomId === room.id) {
+          store.delete("invites", invite.code); store.delete("invites", invite.invitation);
+        }
+      store.delete("rooms", room.id);
+    }
+    const referencedSongs = new Set<string>();
+    for (const room of store.all("rooms")) {
+      if (room.current) referencedSongs.add(room.current.songId);
+      for (const item of room.queue) referencedSongs.add(item.songId);
+    }
+    for (const song of store.all("songs"))
+      if (!referencedSongs.has(song.id)) store.delete("songs", song.id);
   }, 1000);
   sweep.unref();
   return {
     app,
     http,
     io,
-    auth,
+    participants,
     rooms,
-    library,
     youtube,
     separations,
     publish,
