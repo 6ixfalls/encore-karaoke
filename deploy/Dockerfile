@@ -18,11 +18,15 @@ ENV NODE_ENV=production WEB_DIR=/app/dist/web PORT=3000 \
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY server/separation-requirements.txt ./server/separation-requirements.txt
-RUN python3 -m venv /opt/venv && \
+# sphn builds from source on ARM64 and needs a C/C++ toolchain and CMake 3.x.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake pkg-config && \
+    python3 -m venv /opt/venv && \
     python -m pip install --no-cache-dir --upgrade pip && \
     python -m pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 --index-url "${TORCH_INDEX_URL}" --extra-index-url https://pypi.org/simple && \
-    python -m pip install --no-cache-dir -r server/separation-requirements.txt && \
-    python -c 'from demucs.pretrained import get_model; get_model("htdemucs")'
+    CMAKE=/usr/bin/cmake python -m pip install --no-cache-dir -r server/separation-requirements.txt && \
+    python -c 'from demucs.pretrained import get_model; get_model("htdemucs")' && \
+    apt-get purge -y --auto-remove build-essential cmake pkg-config && \
+    rm -rf /var/lib/apt/lists/* /root/.cache
 ENV HF_HUB_OFFLINE=1
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
