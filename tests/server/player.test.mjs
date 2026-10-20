@@ -645,3 +645,85 @@ test("preparation honors a pause and seek issued before media becomes ready", as
   assert.equal(player.loading, false);
   assert.equal(player.lines[0].text, "Line");
 });
+
+test("streamed guide holds playback for lookahead and resumes after refill", async t => {
+  const { player, service, room, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  service.request = async () => ({ id: "job", media: "/media/job", ready: true, complete: true });
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  player.audio.currentTime = 10;
+  player.referenceSnapshot = { through: 16, complete: false };
+  await player.update(playing);
+  assert.equal(player.audio.paused, true);
+  assert.equal(player.guideBuffering, true);
+  const bufferingReports = reports.filter(report => report.state === "buffering").length;
+  await player.update(playing);
+  assert.equal(reports.filter(report => report.state === "buffering").length, bufferingReports);
+  player.referenceSnapshot = { through: 20, complete: false };
+  await player.update(playing);
+  assert.equal(player.audio.paused, true);
+  player.referenceSnapshot = { through: 24, complete: false };
+  await player.update(playing);
+  assert.equal(player.audio.paused, false);
+  player.referenceSnapshot = { through: 24, complete: true };
+  player.audio.currentTime = 22;
+  await player.update(playing);
+  assert.equal(player.audio.paused, false);
+});
+
+test("repeated end telemetry cannot extend the score break indefinitely", async t => {
+  const { player, service, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  player.loaded = "first";
+  player.report("ended", "first");
+  const deadline = player.resultsUntil;
+  player.report("ended", "first");
+  assert.equal(player.resultsUntil, deadline);
+  service.request = async () => ({ id: "next-job", media: "/next", ready: true, complete: true });
+  const next = { ...room, desired: "playing", current: { playbackId: "second" } };
+  await player.update(next);
+  assert.equal(player.loaded, "first");
+  clearTimeout(player.resultsTimer);
+  player.resultsUntil = performance.now() - 1;
+  await player.update(next);
+  assert.equal(player.loaded, "second");
+  assert.equal(player.audio.paused, false);
+});
+
+test("network heartbeats renew the display even when interval timers do not run", async t => {
+  const { player, service, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  player.room = room;
+  player.expires = performance.now() - 1;
+  let renewals = 0;
+  service.request = async url => {
+    assert.ok(url.endsWith("/display/renew"));
+    renewals++;
+    return { generation: "generation-1", leaseMs: 10000 };
+  };
+  await player.heartbeat();
+  assert.equal(renewals, 1);
+  assert.equal(player.valid(), true);
+});
+
+test("ending media waits for the final streamed reference before submitting scores", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { player, service, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  player.loaded = "video";
+  player.separation = { id: "job", roomId: "room-1" };
+  let requests = 0;
+  service.request = async () => ({ complete: ++requests > 1 });
+  player.report("ended");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reports.some(report => report.state === "ended"), false);
+  t.mock.timers.tick(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reports.at(-1).state, "ended");
+  assert.equal(requests, 2);
+});

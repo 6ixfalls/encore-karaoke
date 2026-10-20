@@ -15,7 +15,7 @@ export class BrowserPlayer {
     this.lyricsTimer = setInterval(() => this.renderLyrics(), 50);
     this.timer = setInterval(() => {
       if (this.generation && this.valid() && this.loaded && !this.loading)
-        this.report(this.audio.paused ? "paused" : this.mediaState);
+        this.report(this.guideBuffering ? "buffering" : this.audio.paused ? "paused" : this.mediaState);
     }, 1000);
     window.addEventListener("pagehide", () => this.stop().catch(() => {}));
   }
@@ -46,6 +46,8 @@ export class BrowserPlayer {
     }
   }
   clearMedia() {
+    this.referenceSnapshot = null;
+    this.guideBuffering = false;
     this.seekId = null;
     this.pendingSeek = null;
     const separation = this.separation;
@@ -78,7 +80,7 @@ export class BrowserPlayer {
     this.gate.connect(this.context.destination);
     this.context.addEventListener("statechange", () => {
       if (this.context.state !== "running" && this.generation)
-        this.stop().catch((error) => this.error(error));
+        this.stop(`audio_context_${this.context.state}`).catch((error) => this.error(error));
     });
     await this.context.resume();
     this.started = true;
@@ -113,7 +115,7 @@ export class BrowserPlayer {
     // Retire media and microphone capture when the display lease expires.
     clearTimeout(this.expiryTimer);
     this.expiryTimer = setTimeout(
-      () => this.stop().catch((error) => this.error(error)),
+      () => this.stop("lease_expired").catch((error) => this.error(error)),
       budget,
     );
   }
@@ -145,6 +147,25 @@ export class BrowserPlayer {
     );
     await this.update(await this.services.request(`/api/rooms/${roomId}`));
   }
+  async heartbeat() {
+    const generation = this.generation;
+    if (!generation || !this.connected) return;
+    try {
+      await this.renew();
+      if (generation !== this.generation) return;
+      // Network events remain active when background timer callbacks are delayed.
+      if (this.separation && !this.separation.finishing &&
+          (!this.referenceSnapshot?.complete || this.referenceSnapshot.lyricsPending)) {
+        clearTimeout(this.separationTimer);
+        await this.pollSeparation(this.loadingVersion, this.loaded);
+      }
+      if (this.room) await this.update(this.room);
+    } catch (error) {
+      if (generation !== this.generation) return;
+      this.error(error);
+      this.stop().catch(this.error);
+    }
+  }
   async renew() {
     if (!this.generation || this.renewing || !this.connected) return;
     this.renewing = true;
@@ -175,16 +196,25 @@ export class BrowserPlayer {
       if (!job.finishing) {
         job.finishing = true;
         clearTimeout(this.separationTimer);
-        this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`).then(snapshot => {
+        const finish = () => this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`).then(snapshot => {
           if (this.separation !== job || this.loaded !== playbackId || !this.valid()) return;
           this.performanceTools?.updateLiveReference?.(snapshot);
+          if (snapshot.complete === false) {
+            this.separationTimer = setTimeout(finish, 1000);
+            return;
+          }
           job.finalized = true;
           this.report(state, playbackId);
         }).catch(error => {
           if (this.separation === job) this.failPlayback(error, playbackId);
         });
+        finish();
       }
       return;
+    }
+    if (state === "ended" && this.endedPlaybackId !== playbackId) {
+      this.endedPlaybackId = playbackId;
+      this.resultsUntil = performance.now() + 5000;
     }
     this.telemetry({
       leaseGeneration: this.generation,
@@ -235,6 +265,11 @@ export class BrowserPlayer {
     if (this.loaded !== playbackId) {
       // Failure snapshots pause playback; wait for an explicit resume before retrying.
       if (this.failedPlaybackId === playbackId && room.desired !== "playing") return;
+      if (this.resultsUntil > performance.now()) {
+        clearTimeout(this.resultsTimer);
+        this.resultsTimer = setTimeout(() => this.update(this.room).catch(this.error), this.resultsUntil - performance.now());
+        return;
+      }
       const version = ++this.loadingVersion;
       this.loading = true;
       this.mediaState = "loading";
@@ -294,6 +329,19 @@ export class BrowserPlayer {
         this.seekId = seek.id;
       }
     }
+    const reference = this.referenceSnapshot;
+    if (reference && !reference.complete && Number.isFinite(reference.through)) {
+      const ahead = reference.through - this.audio.currentTime;
+      if (ahead < 7 || this.guideBuffering && ahead < 14) {
+        const entering = !this.guideBuffering;
+        this.guideBuffering = true;
+        this.audio.pause();
+        this.mediaState = "buffering";
+        if (entering) this.report("buffering");
+        return;
+      }
+    }
+    this.guideBuffering = false;
     if (this.room.desired === "playing") {
       if (this.audio.paused && !this.audio.ended) {
         const generation = this.generation;
@@ -315,10 +363,12 @@ export class BrowserPlayer {
   }
   async pollSeparation(version, playbackId) {
     const job = this.separation;
-    if (!job || job.finishing || version !== this.loadingVersion || !this.valid()) return;
+    if (!job || job.finishing || job.polling || version !== this.loadingVersion || !this.valid()) return;
+    job.polling = true;
     try {
       const snapshot = await this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`);
       if (this.separation !== job || job.finishing || version !== this.loadingVersion || !this.valid()) return;
+      this.referenceSnapshot = snapshot;
       this.performanceTools?.updateLiveReference?.(snapshot);
       if (snapshot.lyrics) this.lines = snapshot.lyrics.lines;
       if (this.loading && snapshot.ready) {
@@ -333,10 +383,11 @@ export class BrowserPlayer {
         this.failedPlaybackId = null;
         await this.update(this.room);
       }
+      if (!this.loading && this.guideBuffering) await this.update(this.room);
       if (!snapshot.complete || this.loading || snapshot.lyricsPending) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
     } catch (error) {
       if (this.separation === job && !job.finishing && version === this.loadingVersion) this.failPlayback(error, playbackId);
-    }
+    } finally { job.polling = false; }
   }
   failPlayback(error, playbackId) {
     this.loadingVersion++;
@@ -350,6 +401,9 @@ export class BrowserPlayer {
   }
   renderLyrics() {
     const position = this.audio.currentTime;
+    if (this.referenceSnapshot && !this.referenceSnapshot.complete && !this.loading &&
+        !this.audio.paused && this.referenceSnapshot.through - position < 7 && !this.guideBuffering)
+      this.update(this.room).catch(this.error);
     this.performanceTools?.update(this);
     const index = (this.lines || []).findLastIndex(
       (line) => line.time <= position,
@@ -375,8 +429,9 @@ export class BrowserPlayer {
     // A reconnect never opens output by itself; a successful lease renewal must rearm it.
     if (this.gate) this.gate.gain.setValueAtTime(0, this.context.currentTime);
   }
-  async stop() {
+  async stop(reason = "stopped") {
     if (this.stopping) return this.stopping;
+    if (this.generation) console.info("Karaoke display stopped", { reason });
     const generation = this.generation;
     this.generation = null;
     this.revalidated = false;

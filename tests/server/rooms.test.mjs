@@ -162,3 +162,33 @@ test("seek preserves pause state and playback identity, and reclaim restores the
   assert.equal(f.state().current.seek.position, 42.25);
   assert.notEqual(f.state().current.seek.id, seekId);
 });
+
+test("enqueue starts an idle display and completion advances with the previous score", t => {
+  const f = fixture(t), grant = f.rooms.claim(f.room.id, f.host);
+  f.enqueue(f.guest());
+  assert.equal(f.state().desired, "playing");
+  const first = f.state().current;
+  f.enqueue();
+  const report = { leaseGeneration: grant.generation, playbackId: first.playbackId, position: 1, state: "playing" };
+  f.rooms.telemetry(f.room.id, f.host, report);
+  f.rooms.telemetry(f.room.id, f.host, { ...report, state: "ended", score: { mode: "guide", value: 95, samples: 30 } });
+  assert.equal(f.state().scores[0].value, 95);
+  assert.notEqual(f.state().current.playbackId, first.playbackId);
+  assert.equal(f.state().desired, "playing");
+  const second = { ...report, playbackId: f.state().current.playbackId };
+  f.rooms.telemetry(f.room.id, f.host, second);
+  f.rooms.telemetry(f.room.id, f.host, { ...second, state: "ended" });
+  assert.equal(f.state().current, null);
+  assert.equal(f.state().desired, "paused");
+  f.enqueue();
+  assert.equal(f.state().desired, "playing");
+});
+
+test("songs queued before the TV claims its lease start on claim", t => {
+  const f = fixture(t);
+  f.enqueue();
+  assert.equal(f.state().current, null);
+  f.rooms.claim(f.room.id, f.host);
+  assert.ok(f.state().current);
+  assert.equal(f.state().desired, "playing");
+});

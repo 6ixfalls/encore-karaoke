@@ -119,6 +119,7 @@ function connect() {
   });
   socket.on("connect", () => {
     $("connection").textContent = "Connected";
+    socket.io.engine.on("ping", () => player.heartbeat());
     if (room) subscribe();
   });
   socket.on("disconnect", () => {
@@ -225,6 +226,19 @@ function render(snapshot) {
     if (document.activeElement !== $(id)) $(id).value = String(value);
   if (document.activeElement !== $("guest-control"))
     $("guest-control").checked = room.policy.guestControl;
+  $("queue-empty").hidden = room.queue.length > 0;
+  $("song-queue").replaceChildren(...room.queue.map(item => {
+    const row = document.createElement("li"); row.className = "queue-item";
+    row.append(label(`${item.title} · ${item.artist} — ${item.nickname}`));
+    if (isHost() || item.owner === session.id)
+      row.append(button("Remove", () => command("remove", { id: item.id })));
+    return row;
+  }));
+  $("song-scores").replaceChildren(...(room.scores || []).slice().reverse().map(score => {
+    const row = document.createElement("li");
+    row.textContent = `${score.title} · ${score.nickname}: ${Math.round(score.value)} / 100`;
+    return row;
+  }));
   player.update(room).catch(showError);
   renderTV?.(room);
   if (tv) startDisplay().catch(showError);

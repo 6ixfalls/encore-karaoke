@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { PassThrough, type Readable, type Writable } from "node:stream";
+import { PassThrough, Readable, type Writable } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, openSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
+import { open } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,8 +87,14 @@ export class Separations {
       job.progress = Date.now();
       if (bytes > 1024 * 1024 * 1024) this.fail(job, "separation_media_limit");
     });
-    writer.on("error", () => this.fail(job, "separation_storage_failed"));
-    writer.on("finish", () => { job.ready = job.state === "complete"; });
+    writer.on("error", (error: NodeJS.ErrnoException) => {
+      if (!this.jobs.has(job.id) || job.state === "failed") return;
+      const code = ["ENOSPC", "EDQUOT"].includes(error.code || "") ? "separation_storage_full"
+        : ["EACCES", "EPERM", "EROFS"].includes(error.code || "") ? "separation_storage_unwritable" : "separation_storage_failed";
+      console.warn("Temporary media write failed", { code: error.code });
+      this.fail(job, code);
+    });
+    writer.on("finish", () => { job.ready = job.state !== "failed"; });
     job.output.pipe(writer);
     // A full output pipe can intentionally suspend the entire processing chain.
     // Give inference a fresh stall interval when the consumer resumes reading.
@@ -155,6 +163,32 @@ export class Separations {
       }
     });
   }
+  // Read only committed bytes, waiting at the growing EOF instead of ending the response.
+  media(job: SeparationJob, signal?: AbortSignal) {
+    const jobs = this.jobs;
+    return Readable.from((async function* () {
+      const file = await open(job.file, "r");
+      let offset = 0;
+      try {
+        while (!signal?.aborted && jobs.has(job.id) && job.current() && job.state !== "failed") {
+          const available = job.writer.bytesWritten - offset;
+          if (available > 0) {
+            const bytes = Buffer.alloc(Math.min(available, 256 * 1024));
+            const { bytesRead } = await file.read(bytes, 0, bytes.length, offset);
+            offset += bytesRead;
+            if (bytesRead) yield bytes.subarray(0, bytesRead);
+          } else if (job.writer.writableFinished) return;
+          else await delay(100, undefined, { signal });
+        }
+        throw new Fault(job.error || "stale_display", 502);
+      } finally { await file.close(); }
+    })());
+  }
+  playable(job: SeparationJob) {
+    job.ready = job.state !== "failed" && job.writer.bytesWritten > 0 &&
+      (job.frames.samples >= 16 * RATE || job.referenceComplete && job.writer.writableFinished);
+    return job.ready;
+  }
   get(id: string, roomId: string, deviceId: string) {
     const job = this.jobs.get(id);
     requireValue(job && job.roomId === roomId && job.deviceId === deviceId, "separation_not_found", 404);
@@ -164,6 +198,7 @@ export class Separations {
   }
   fail(job: SeparationJob, error: string) {
     if (job.state === "failed") return;
+    console.warn("Vocal separation failed", { error, processedSeconds: job.frames.samples / RATE, storedBytes: job.writer.bytesWritten });
     job.state = "failed"; job.error = error;
     job.controller.abort();
     job.processes.forEach(child => child.kill("SIGKILL"));
@@ -189,7 +224,7 @@ export class Separations {
     for (const job of this.jobs.values()) {
       if (!job.current() || now - job.started > 30 * 60_000) this.stop(job.id);
       else if (job.claimed && job.output.writableNeedDrain) job.progress = now;
-      else if (job.state !== "complete" && job.state !== "failed" && now - job.progress > 120000) this.fail(job, "separation_stalled");
+      else if (job.state !== "complete" && job.state !== "failed" && now - job.progress > 300000) this.fail(job, "separation_stalled");
     }
   }
   close() { for (const id of this.jobs.keys()) this.stop(id); }

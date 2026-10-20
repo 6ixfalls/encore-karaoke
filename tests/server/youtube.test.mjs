@@ -22,7 +22,7 @@ test("yt-dlp extraction uses safe arguments, caches signed URLs and preserves by
 });
 test("yt-dlp search uses structured output and treats the query as an argument", async () => {
   const youtube = new YouTube("yt-dlp", async (_binary, args) => {
-    assert.equal(args.at(-1), "https://music.youtube.com/search?q=karaoke%20%26%20song#songs");
+    assert.equal(args.at(-1), "ytsearch12:karaoke & song");
     return { entries: [{ id: "M7lc1UVf-VE", title: "Song", channel: "Artist" }, { id: "bad" }] };
   });
   assert.deepEqual(await youtube.search("karaoke & song"), [{ videoId: "M7lc1UVf-VE", title: "Song", artist: "Artist" }]);
@@ -38,7 +38,7 @@ test("adaptive video and audio URLs are extracted without downloading or requiri
 });
 test("pasted links use YouTube Music track and artist metadata instead of upload titles", async () => {
   const youtube = new YouTube("yt-dlp", async (_binary, args) => {
-    assert.equal(args.at(-1), "https://music.youtube.com/watch?v=M7lc1UVf-VE");
+    assert.equal(args.at(-1), "https://www.youtube.com/watch?v=M7lc1UVf-VE");
     return { id: "M7lc1UVf-VE", title: "Song (Official Audio)", track: "Song", artists: ["Artist", "Guest"], duration: 195 };
   });
   assert.deepEqual(await youtube.metadata("M7lc1UVf-VE"), { videoId: "M7lc1UVf-VE", title: "Song", artist: "Artist, Guest", duration: 195 });
@@ -56,4 +56,11 @@ test("extraction rejects arbitrary URLs, live broadcasts, excessive duration and
 });
 test("missing yt-dlp fails explicitly", async () => {
   await assert.rejects(runJson("/nonexistent/encore-yt-dlp", []), /yt_dlp_unavailable/);
+});
+
+test("YouTube uploader metadata survives flat search without a Music placeholder", async () => {
+  const youtube = new YouTube("yt-dlp", async () => ({ entries: [
+    { id: "M7lc1UVf-VE", title: "Song", uploader: "Actual artist" },
+  ] }));
+  assert.equal((await youtube.search("Song"))[0].artist, "Actual artist");
 });

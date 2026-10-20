@@ -15,6 +15,8 @@ export function mountTV() {
   shell.querySelector(".bottom-actions").append($("end"));
   shell.querySelector(".top-bar-container").append($("now-title"), $("now-artist"), $("playback-status"));
   shell.append($("pitch-staff"));
+  const lastScore = document.createElement("p"); lastScore.id = "tv-last-score";
+  shell.querySelector(".top-bar-container").append(lastScore);
   shell.querySelector(".bottom-actions").append($("toggle-scoring"));
   $("toggle-scoring").classList.add("action-button");
   shell.querySelector(".player-ui").append($("lyrics"), $("next-lyrics"), $("score"));
@@ -47,6 +49,8 @@ export function mountTV() {
     shell.querySelector(".standby-screen").hidden = !!room.current;
     shell.querySelector(".player-ui").hidden = !room.current;
     shell.querySelector(".idle-hint").hidden = !!room.current;
+    const score = room.scores?.at(-1);
+    lastScore.textContent = score ? `${score.title} · ${score.nickname}: ${Math.round(score.value)} / 100` : "";
     $("tv-next").textContent = room.queue.map((song) => `${song.title} · ${song.artist || song.nickname}`).join(" / ") || "Choose your first song";
     $("tv-remote-count").textContent = room.participants.filter((p) => p.role === "guest").length;
     $("host-tools").hidden = true;

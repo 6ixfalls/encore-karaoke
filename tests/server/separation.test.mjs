@@ -170,7 +170,7 @@ test("stalled preparation still fails without an active browser consumer", async
   const jobs = new Separations({}, { resolve: async () => source }, launch);
   t.after(() => jobs.close());
   const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
-  t.mock.timers.setTime(121001);
+  t.mock.timers.setTime(301001);
   jobs.sweep();
   assert.equal(job.error, "separation_stalled");
   assert.ok(children.every(child => child.killed));
@@ -188,4 +188,50 @@ test("output backpressure does not bypass the absolute job lifetime", async t =>
   jobs.sweep();
   assert.equal(jobs.jobs.size, 0);
   assert.ok(children.every(child => child.killed));
+});
+
+test("media starts with a reference buffer and tails committed bytes before completion", async t => {
+  const { children, launch } = fakeProcesses();
+  const jobs = new Separations({}, { resolve: async () => source }, launch);
+  t.after(() => jobs.close());
+  const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+  children[2].stdout.write("first");
+  while (job.writer.bytesWritten < 5) await new Promise(resolve => setImmediate(resolve));
+  job.frames.samples = 8 * 44100;
+  assert.equal(jobs.playable(job), false);
+  job.frames.samples = 16 * 44100;
+  assert.equal(jobs.playable(job), true);
+  assert.notEqual(job.state, "complete");
+  const stream = jobs.media(job), iterator = stream[Symbol.asyncIterator]();
+  assert.equal((await iterator.next()).value.toString(), "first");
+  const next = iterator.next();
+  children[2].stdout.end("second");
+  children[2].emit("close", 0);
+  assert.equal((await next).value.toString(), "second");
+  assert.equal((await iterator.next()).done, true);
+});
+
+test("storage failures distinguish host capacity and permissions", async t => {
+  for (const [code, expected] of [["ENOSPC", "separation_storage_full"], ["EROFS", "separation_storage_unwritable"]]) {
+    const { launch } = fakeProcesses();
+    const jobs = new Separations({}, { resolve: async () => source }, launch);
+    t.after(() => jobs.close());
+    const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+    job.writer.emit("error", Object.assign(new Error(code), { code }));
+    assert.equal(job.error, expected);
+  }
+});
+
+test("closing a growing media response releases its reader without cancelling preparation", async t => {
+  const { launch } = fakeProcesses();
+  const jobs = new Separations({}, { resolve: async () => source }, launch);
+  t.after(() => jobs.close());
+  const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+  const controller = new AbortController();
+  const stream = jobs.media(job, controller.signal);
+  const next = stream[Symbol.asyncIterator]().next();
+  controller.abort();
+  await assert.rejects(next, /aborted|stale_display/i);
+  assert.equal(jobs.get(job.id, "room", "display"), job);
+  assert.equal(job.writer.destroyed, false);
 });

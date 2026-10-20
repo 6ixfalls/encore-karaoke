@@ -263,7 +263,7 @@ export class Rooms {
       const videoId = text(p.youtube, 11);
       requireValue(/^[a-zA-Z0-9_-]{11}$/.test(videoId), "invalid_youtube_id");
       const metadata = this.store.get("songs", `yt:${videoId}`);
-      const song = metadata || { id: `yt:${videoId}`, title: text(p.title, 200), artist: typeof p.artist === "string" ? text(p.artist, 200) : "YouTube Music", format: "youtube" as const, videoId };
+      const song = metadata || { id: `yt:${videoId}`, title: text(p.title, 200), artist: typeof p.artist === "string" ? text(p.artist, 200) : "Unknown artist", format: "youtube" as const, videoId };
       delete song.metadataExpires;
       this.store.put("songs", song.id, song);
       room.queue.push({
@@ -274,6 +274,10 @@ export class Rooms {
         owner: session.id,
         nickname: session.nickname,
       });
+      if (!room.current && this.available(room)) {
+        this.next(room);
+        room.desired = "playing";
+      }
       return;
     }
     if (type === "remove") {
@@ -285,6 +289,10 @@ export class Rooms {
         room.current = null;
         room.desired = "paused";
         room.observed = "ready";
+        if (room.queue.length && this.available(room)) {
+          this.next(room);
+          room.desired = "playing";
+        }
       }
       return;
     }
@@ -428,6 +436,10 @@ export class Rooms {
       };
       room.desired = "paused";
       room.observed = "ready";
+      if (!room.current && room.queue.length) {
+        this.next(room);
+        room.desired = "playing";
+      }
       if (room.current) room.current.seek = { id: randomUUID(), position: room.position };
       room.revision++;
       this.store.put("rooms", room.id, room);

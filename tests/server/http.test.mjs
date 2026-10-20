@@ -147,7 +147,7 @@ test("YouTube search uses yt-dlp and separation streams belong exclusively to th
     const output = new PassThrough();
     const directory = mkdtempSync(join(tmpdir(), "encore-test-")), file = join(directory, "backing.mp4");
     writeFileSync(file, "instrumental");
-    const job = { id: "job", directory, file, writer: output, ready: true, roomId, playbackId: track, deviceId, current, output, controller: new AbortController(), processes: [], claimed: false, state: "processing", frames: { snapshot: () => ({ pitches: [], through: 0 }) } };
+    const job = { id: "job", directory, file, writer: { bytesWritten: 12, writableFinished: true, destroy() {} }, referenceComplete: true, ready: true, roomId, playbackId: track, deviceId, current, output, controller: new AbortController(), processes: [], claimed: false, state: "processing", frames: { samples: 44100 * 20, snapshot: () => ({ pitches: [], through: 20 }) } };
     f.server.separations.jobs.set(job.id, job); return job;
   };
   const job = await f.request(route, { token: f.tv.token, method: "POST", body: { playbackId } });

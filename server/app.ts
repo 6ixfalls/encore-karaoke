@@ -199,13 +199,13 @@ export function createApplication(store: Store, config: Configuration) {
         active.lease?.deviceId === session.id && !active.lease?.releaseRequested && rooms.available(active);
     };
     const job = await separations.create(room.id, playbackId, session.id, song.videoId, current);
-    res.status(201).json({ id: job.id, ready: job.ready, media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
+    res.status(201).json({ id: job.id, ready: separations.playable(job), media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
   });
   app.get("/api/rooms/:roomId/separation/:id", (req, res) => {
     const session = participant(req);
     rooms.room(req.params.roomId, session);
     const job = separations.get(req.params.id, req.params.roomId, session.id);
-    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete, ready: job.ready,
+    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete, ready: separations.playable(job),
       lyrics: job.lyrics, lyricsPending: job.lyrics === undefined });
   });
   app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {
@@ -216,18 +216,27 @@ export function createApplication(store: Store, config: Configuration) {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
     const job = separations.get(req.params.id, roomId, session.id);
-    requireValue(job.ready, "media_preparing", 409);
-    res.set("Cache-Control", "no-store").sendFile(job.file);
+    requireValue(separations.playable(job), "media_preparing", 409);
+    res.set({ "Cache-Control": "no-store", "Content-Type": "video/mp4" });
+    if (job.writer.writableFinished) res.sendFile(job.file);
+    else res.set("Accept-Ranges", "none").end();
   });
   app.get("/media/separation/:id", (req, res) => {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
     const job = separations.get(req.params.id, roomId, session.id);
-    requireValue(job.ready, "media_preparing", 409);
+    requireValue(separations.playable(job), "media_preparing", 409);
     requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
     job.claimed = true; transfers++;
     res.once("close", () => { transfers--; });
-    res.set("Cache-Control", "no-store").sendFile(job.file);
+    res.set({ "Cache-Control": "no-store", "Content-Type": "video/mp4" });
+    if (job.writer.writableFinished) { res.sendFile(job.file); return; }
+    res.set({ "Accept-Ranges": "none", "X-Accel-Buffering": "no" });
+    const controller = new AbortController();
+    const stream = separations.media(job, controller.signal);
+    res.once("close", () => { controller.abort(); stream.destroy(); });
+    stream.on("error", () => res.destroy());
+    stream.pipe(res);
   });
   app.get("/media/youtube/:id", async (req, res) => {
     const session = participant(req);
@@ -306,6 +315,8 @@ export function createApplication(store: Store, config: Configuration) {
   });
   const io = new Server(http, {
     serveClient: true,
+    // Network heartbeats also wake background TVs whose JS timers are throttled.
+    pingInterval: 2000,
     maxHttpBufferSize: 16 * 1024,
     allowRequest: (req, callback) =>
       callback(
