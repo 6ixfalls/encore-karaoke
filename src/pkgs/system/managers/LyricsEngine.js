@@ -169,6 +169,7 @@ export default class LyricsEngine {
    */
   constructor(context) {
     this.ctx = context;
+    this.romanizer = context.romanizer || Romanizer;
 
     if (this.ctx.state.isEasterEggInterludeEnabled) {
       console.log("ooo freaky 🤪");
@@ -800,7 +801,7 @@ export default class LyricsEngine {
     return Promise.all(parseLrc(text).map(async (line) => {
       let romanized = "";
       if (this.asianRegex.test(line.text)) {
-        romanized = await Romanizer.romanize(line.text);
+        romanized = await this.romanizer.romanize(line.text);
         this.romajiCache[line.text] = romanized;
       }
       return { ...line, romanized };
@@ -841,7 +842,7 @@ export default class LyricsEngine {
           !this.pendingRomajiFetches.has(chunkText)
         ) {
           this.pendingRomajiFetches.add(chunkText);
-          Romanizer.romanize(chunkText).then((res) => {
+          this.romanizer.romanize(chunkText).then((res) => {
             this.romajiCache[chunkText] = res || "";
             this.pendingRomajiFetches.delete(chunkText);
             const isLastLine =
@@ -1264,7 +1265,7 @@ export default class LyricsEngine {
               chunk.romaji = "";
               if (!this.pendingRomajiFetches.has(chunkText)) {
                 this.pendingRomajiFetches.add(chunkText);
-                Romanizer.romanize(chunkText).then((res) => {
+                this.romanizer.romanize(chunkText).then((res) => {
                   this.romajiCache[chunkText] = res || "";
                   this.pendingRomajiFetches.delete(chunkText);
                   this.calculateLyricLayout();

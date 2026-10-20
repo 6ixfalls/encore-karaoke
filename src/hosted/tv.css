@@ -3,6 +3,12 @@
 @import "../styles/menu.css";
 @import "../styles/modals.css";
 @import "../styles/search-queue.css";
+@font-face {
+  font-family: "Radio Canada";
+  src: url("../assets/fonts/radio-canada-v26-latin-700.woff2") format("woff2");
+  font-weight: 700 900;
+  font-display: swap;
+}
 body.tv { background: #080810; font-family: RadioCanada, sans-serif; }
 body.tv:has(#room:not([hidden])) { overflow: hidden; }
 body.tv:has(#room:not([hidden])) > header, body.tv:has(#room:not([hidden])) footer { display: none; }
@@ -13,14 +19,14 @@ body.tv #message { position: fixed; top: 12px; left: 20%; right: 20%; z-index: 1
 #tv-appliance .overlay-ui { background: transparent; pointer-events: none; }
 #tv-appliance .stage { position: absolute; inset: 0; border: 0; border-radius: 0; padding: 0; margin: 0; background: transparent; }
 #tv-appliance #local-media { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; object-fit: contain; }
-#tv-appliance .player-ui { display: flex; position: absolute; inset: auto 5% 22%; height: auto; max-height: 30vh; overflow: hidden; padding: 0; background: transparent; flex-direction: column; align-items: center; z-index: 12; pointer-events: none; }
-#tv-appliance #lyrics, #tv-appliance #next-lyrics { max-width: 100%; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 0; text-align: center; }
+#tv-appliance .player-ui { bottom: 7rem; z-index: 12; }
+#tv-appliance #lyrics-canvas { display: block; }
+#tv-appliance #score { position: absolute; bottom: 0; }
+body.tv #lyrics, body.tv #next-lyrics { display: none; }
 #tv-appliance .tv-dock { position: absolute; bottom: 3rem; left: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 12px; z-index: 26; }
 #tv-appliance #play-controls { justify-content: center; background: #080810dd; border-radius: 12px; padding: .5rem; margin: 0; }
 #tv-appliance #seek-form { flex: 1; max-width: 440px; }
 #tv-appliance #seek { max-width: none; }
-#tv-appliance #lyrics { font-size: clamp(32px, 4vw, 68px); color: #fff; text-shadow: 2px 2px 4px #000, -1px -1px 2px #000; margin: 0; }
-#tv-appliance #next-lyrics { color: #ddd; text-shadow: 2px 2px 4px #000; }
 #tv-appliance .top-bar-container { z-index: 15; }
 #tv-appliance #now-title { font-size: 28px; margin: 0; }
 #tv-appliance #now-artist { margin: 0; opacity: .7; }
@@ -45,7 +51,7 @@ body.tv:has(#room:not([hidden])) #host-tools { display: none; }
 #tv-appliance #tv-pairing { grid-column: 1 / -1; }
 #tv-appliance .action-button { text-decoration: none; }
 @media (max-width: 700px) {
-  #tv-appliance .player-ui { bottom: 36%; }
+  #tv-appliance .player-ui { bottom: 11rem; }
   #tv-appliance .top-bar-container { left: 1rem; top: 1rem; right: 1rem; }
   #tv-appliance .qr-code-container { right: 1rem; }
   #tv-appliance .standby-screen { min-width: 0; max-width: 90%; }

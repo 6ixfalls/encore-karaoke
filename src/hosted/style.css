@@ -204,6 +204,7 @@ footer,
   color: var(--muted);
 }
 #lyrics:empty, #next-lyrics:empty { display: none; }
+#lyrics-canvas { display: none; }
 .stage .controls {
   justify-content: center;
 }

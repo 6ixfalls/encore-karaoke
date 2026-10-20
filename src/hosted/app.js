@@ -5,6 +5,7 @@ import { PerformanceTools } from "./performance.js";
 import { mountTV } from "./tv.js";
 import { RemoteMicrophone } from "./remote-microphone.js";
 import { youtubeId } from "./youtube.js";
+import { HostedLyrics } from "./lyrics.js";
 
 const $ = (id) => document.getElementById(id);
 const services = new BrowserServices();
@@ -53,6 +54,7 @@ const label = (value, className) => {
 };
 const isHost = () => session?.role === "host";
 const recordingUrls = [];
+let lyricRenderer;
 const staff = new PitchStaff($("pitch-staff"), $("pitch-canvas"));
 const performanceTools = new PerformanceTools({
   staff,
@@ -82,6 +84,10 @@ const player = new BrowserPlayer(services, {
   lyrics: (current, next) => {
     $("lyrics").textContent = current;
     $("next-lyrics").textContent = next;
+    if (tv) {
+      lyricRenderer ||= new HostedLyrics($("lyrics-canvas"));
+      lyricRenderer.update(player.lines, player.audio.currentTime);
+    }
   },
   error: showError,
   released: () => {

@@ -15,11 +15,28 @@ export class BrowserPlayer {
     this.lyricsTimer = setInterval(() => this.renderLyrics(), 50);
     this.timer = setInterval(() => {
       if (this.generation && this.valid() && this.loaded && !this.loading)
-        this.report(this.guideBuffering ? "buffering" : this.audio.paused ? "paused" : this.mediaState);
+        this.report(this.guideBuffering || this.seekBuffering ? "buffering" : this.audio.paused ? "paused" : this.mediaState);
     }, 1000);
     window.addEventListener("pagehide", () => this.stop().catch(() => {}));
   }
   bindMedia(media) {
+    media.addEventListener("seeked", () => {
+      if (this.audio !== media || !this.seekApplying || !this.valid()) return;
+      const seek = this.room?.current?.seek;
+      if (seek?.id === this.seekApplying) {
+        if (Math.abs(media.currentTime - seek.position) <= 0.25) {
+          this.seekId = seek.id;
+          this.seekBuffering = false;
+        } else this.seekRejected = true;
+      }
+      this.seekApplying = null;
+      this.update(this.room).catch(this.error);
+    });
+    for (const event of ["loadedmetadata", "durationchange", "progress", "canplay"])
+      media.addEventListener(event, () => {
+        if (this.audio === media && this.seekBuffering && this.valid())
+          this.update(this.room).catch(this.error);
+      });
     media.addEventListener("seeking", () => {
       if (this.audio === media) this.performanceTools?.staff?.reset();
     });
@@ -49,7 +66,12 @@ export class BrowserPlayer {
     this.referenceSnapshot = null;
     this.guideBuffering = false;
     this.seekId = null;
+    this.seekCommandId = null;
     this.pendingSeek = null;
+    this.seekBuffering = false;
+    this.seekReloaded = false;
+    this.seekApplying = null;
+    this.seekRejected = false;
     const separation = this.separation;
     this.separation = null;
     clearTimeout(this.separationTimer);
@@ -155,7 +177,7 @@ export class BrowserPlayer {
       if (generation !== this.generation) return;
       // Network events remain active when background timer callbacks are delayed.
       if (this.separation && !this.separation.finishing &&
-          (!this.referenceSnapshot?.complete || this.referenceSnapshot.lyricsPending)) {
+          (!this.referenceSnapshot?.complete || this.referenceSnapshot.mediaComplete === false || this.referenceSnapshot.lyricsPending)) {
         clearTimeout(this.separationTimer);
         await this.pollSeparation(this.loadingVersion, this.loaded);
       }
@@ -316,17 +338,60 @@ export class BrowserPlayer {
     this.audio.playbackRate = this.room.tempo;
     const seek = current.seek;
     if (seek && this.seekId !== seek.id) {
+      if (this.seekCommandId !== seek.id) {
+        this.seekCommandId = seek.id;
+        this.seekRejected = false;
+        // A seek may pause or reload media while play() is still pending.
+        this.playAttempt = null;
+      }
+      if (this.seekApplying === seek.id) return;
+      const waitForSeek = () => {
+        const entering = !this.seekBuffering;
+        this.seekBuffering = true;
+        this.audio.pause();
+        this.mediaState = "buffering";
+        if (entering) this.report("buffering");
+        // A response opened while the file was growing has no byte ranges.
+        // Reopen it once finalized so the browser can read the MP4 seek index.
+        if (this.referenceSnapshot?.mediaComplete && !this.seekReloaded) {
+          this.seekReloaded = true;
+          this.seekRejected = false;
+          this.audio.load();
+        }
+      };
       // Some browsers reject a seek until the new media has metadata.
       if (this.audio.readyState === 0) {
+        this.audio.pause();
         if (this.pendingSeek !== seek.id) {
           this.pendingSeek = seek.id;
           this.audio.addEventListener("loadedmetadata", () => {
             if (this.loaded === playbackId) this.update(this.room).catch(this.error);
           }, { once: true });
         }
+        return;
       } else {
+        const ranges = this.audio.seekable;
+        const available = !this.seekRejected && (!ranges || Array.from({ length: ranges.length }, (_, i) => i)
+          .some(i => seek.position >= ranges.start(i) && seek.position <= ranges.end(i)));
+        if (!available) {
+          waitForSeek();
+          return;
+        }
+        this.seekApplying = seek.id;
         this.audio.currentTime = seek.position;
+        if (this.audio.seeking) {
+          this.seekBuffering = true;
+          this.audio.pause();
+          return;
+        }
+        this.seekApplying = null;
+        // Do not consume a command the browser clamped back to the stream start.
+        if (Math.abs(this.audio.currentTime - seek.position) > 0.25) {
+          waitForSeek();
+          return;
+        }
         this.seekId = seek.id;
+        this.seekBuffering = false;
       }
     }
     const reference = this.referenceSnapshot;
@@ -346,7 +411,9 @@ export class BrowserPlayer {
       if (this.audio.paused && !this.audio.ended) {
         const generation = this.generation;
         const version = this.loadingVersion;
+        const attempt = this.playAttempt = {};
         await this.audio.play().catch((error) => {
+          if (error.name === "AbortError" && this.playAttempt !== attempt) return;
           if (
             generation !== this.generation ||
             version !== this.loadingVersion ||
@@ -383,8 +450,8 @@ export class BrowserPlayer {
         this.failedPlaybackId = null;
         await this.update(this.room);
       }
-      if (!this.loading && this.guideBuffering) await this.update(this.room);
-      if (!snapshot.complete || this.loading || snapshot.lyricsPending) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
+      if (!this.loading && (this.guideBuffering || this.seekBuffering)) await this.update(this.room);
+      if (!snapshot.complete || snapshot.mediaComplete === false || this.loading || snapshot.lyricsPending) this.separationTimer = setTimeout(() => this.pollSeparation(version, playbackId), 1000);
     } catch (error) {
       if (this.separation === job && !job.finishing && version === this.loadingVersion) this.failPlayback(error, playbackId);
     } finally { job.polling = false; }

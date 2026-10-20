@@ -205,7 +205,8 @@ export function createApplication(store: Store, config: Configuration) {
     const session = participant(req);
     rooms.room(req.params.roomId, session);
     const job = separations.get(req.params.id, req.params.roomId, session.id);
-    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete, ready: separations.playable(job),
+    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete,
+      mediaComplete: job.writer.writableFinished, ready: separations.playable(job),
       lyrics: job.lyrics, lyricsPending: job.lyrics === undefined });
   });
   app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {

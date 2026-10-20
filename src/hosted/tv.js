@@ -19,7 +19,10 @@ export function mountTV() {
   shell.querySelector(".top-bar-container").append(lastScore);
   shell.querySelector(".bottom-actions").append($("toggle-scoring"));
   $("toggle-scoring").classList.add("action-button");
-  shell.querySelector(".player-ui").append($("lyrics"), $("next-lyrics"), $("score"));
+  const lyricSection = document.createElement("div");
+  lyricSection.className = "player-bottom-section";
+  lyricSection.append($("lyrics-canvas"));
+  shell.querySelector(".player-ui").append(lyricSection, $("score"));
   const dock = document.createElement("div");
   dock.className = "tv-dock";
   dock.append(shell.querySelector(".bottom-actions"), $("play-controls"));

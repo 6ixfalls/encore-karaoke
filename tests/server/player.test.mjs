@@ -603,6 +603,143 @@ test("tab hiding does not stop playback; pause, seek and resume retain the loade
   assert.equal(calls.filter(([url, options]) => url.endsWith("/separation") && options?.method === "POST").length, 1);
 });
 
+test("a seek waits for metadata before playing instead of starting at zero", async t => {
+  const { player, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  player.audio.readyState = 0;
+  await player.update({ ...room, desired: "playing", current: {
+    playbackId: "track", seek: { id: "seek-1", position: 42.25 },
+  } });
+  assert.equal(player.audio.playCount, 0);
+  assert.notEqual(player.seekId, "seek-1");
+  player.audio.readyState = 1;
+  player.audio.dispatchEvent(new Event("loadedmetadata"));
+  assert.equal(player.audio.currentTime, 42.25);
+  assert.equal(player.audio.paused, false);
+});
+
+test("a seek beyond a growing stream waits for the finished file and resumes at the latest target", async t => {
+  const { player, service, room, calls, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  player.audio.currentTime = 12;
+  player.audio.readyState = 1;
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 20 };
+  player.referenceSnapshot = { complete: true, mediaComplete: false, through: 90 };
+  const seek = { ...playing, current: { playbackId: "track", seek: { id: "seek-1", position: 60 } } };
+  await player.update(seek);
+  assert.equal(player.audio.currentTime, 12);
+  assert.equal(player.audio.paused, true);
+  assert.notEqual(player.seekId, "seek-1");
+  assert.equal(reports.at(-1).state, "buffering");
+
+  service.request = async () => ({ complete: true, mediaComplete: false, through: 90 });
+  await player.pollSeparation(player.loadingVersion, "track");
+  assert.ok(player.separationTimer); // Reference analysis can finish before the MP4.
+  clearTimeout(player.separationTimer);
+  let reloads = 0;
+  player.audio.load = () => { reloads++; player.audio.currentTime = 0; player.audio.readyState = 0; };
+  service.request = async () => ({ complete: true, mediaComplete: true, through: 90 });
+  await player.pollSeparation(player.loadingVersion, "track");
+  assert.equal(reloads, 1);
+  assert.equal(player.audio.paused, true);
+  await player.update({ ...seek, desired: "paused", current: {
+    playbackId: "track", seek: { id: "seek-2", position: 35 },
+  } });
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 90 };
+  player.audio.readyState = 1;
+  player.audio.dispatchEvent(new Event("loadedmetadata"));
+  assert.equal(player.audio.currentTime, 35);
+  assert.equal(player.seekId, "seek-2");
+  assert.equal(player.audio.paused, true);
+  assert.equal(reloads, 1);
+  assert.equal(calls.filter(([url, options]) => url.endsWith("/separation") && options?.method === "POST").length, 1);
+});
+
+test("a seek is acknowledged only after the browser finishes at the requested position", async t => {
+  const { player, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  player.audio.seeking = true;
+  const seek = { ...playing, current: { playbackId: "track", seek: { id: "seek-1", position: 35 } } };
+  await player.update(seek);
+  assert.notEqual(player.seekId, "seek-1");
+  assert.equal(player.audio.paused, true);
+  player.audio.seeking = false;
+  player.audio.dispatchEvent(new Event("seeked"));
+  assert.equal(player.seekId, "seek-1");
+  assert.equal(player.audio.currentTime, 35);
+  assert.equal(player.audio.paused, false);
+});
+
+test("a new seek recovers from a rejected seek after the finalized media was reloaded", async t => {
+  const { player, room } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  player.audio.readyState = 1;
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 90 };
+  player.referenceSnapshot = { complete: true, mediaComplete: true };
+  player.seekReloaded = true;
+  player.audio.seeking = true;
+  await player.update({ ...playing, current: {
+    playbackId: "track", seek: { id: "seek-1", position: 80 },
+  } });
+  player.audio.currentTime = 0;
+  player.audio.seeking = false;
+  player.audio.dispatchEvent(new Event("seeked"));
+  assert.equal(player.seekRejected, true);
+  assert.equal(player.audio.paused, true);
+
+  await player.update({ ...playing, current: {
+    playbackId: "track", seek: { id: "seek-2", position: 10 },
+  } });
+  assert.equal(player.audio.currentTime, 10);
+  assert.equal(player.seekId, "seek-2");
+  assert.equal(player.audio.paused, false);
+});
+
+test("seek buffering cancels pending play without reporting a playback failure", async t => {
+  const { player, room, reports, errors } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update({ ...playing, desired: "paused" });
+  const originalPlay = player.audio.play.bind(player.audio);
+  const originalPause = player.audio.pause.bind(player.audio);
+  let rejectPlay;
+  player.audio.play = () => new Promise((_resolve, reject) => {
+    rejectPlay = reject;
+    player.audio.paused = false;
+  });
+  player.audio.pause = () => {
+    originalPause();
+    rejectPlay?.(new DOMException("play interrupted by pause", "AbortError"));
+  };
+  const pending = player.update(playing);
+  player.audio.readyState = 1;
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 20 };
+  const seek = { ...playing, current: {
+    playbackId: "track", seek: { id: "seek-1", position: 60 },
+  } };
+  await player.update(seek);
+  await pending;
+  assert.equal(reports.some(report => report.state === "failed"), false);
+  assert.deepEqual(errors, []);
+
+  player.audio.play = originalPlay;
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 90 };
+  player.audio.dispatchEvent(new Event("progress"));
+  assert.equal(player.audio.currentTime, 60);
+  assert.equal(player.audio.paused, false);
+});
+
 test("reconnecting within the same lease reapplies the seek to reloaded media", async t => {
   const { player, room, calls } = fixture(t);
   await player.initialize();

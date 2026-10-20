@@ -152,6 +152,8 @@ test("YouTube search uses yt-dlp and separation streams belong exclusively to th
   };
   const job = await f.request(route, { token: f.tv.token, method: "POST", body: { playbackId } });
   assert.equal(job.status, 201);
+  const snapshot = await f.request(`${route}/job`, { token: f.tv.token });
+  assert.equal(snapshot.data.mediaComplete, true);
   const url = new URL(job.data.media, f.origin);
   assert.equal(url.searchParams.get("participant"), f.tv.token);
   const foreign = new URL(url); foreign.searchParams.set("participant", guest.token);
