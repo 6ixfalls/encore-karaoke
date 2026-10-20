@@ -17,15 +17,39 @@ export function staffPosition(pitch) {
 export function targetBars(reference, start, end, step = .04) {
   const bars = [], active = new Map();
   for (let time = Math.max(0, start); time < end; time += step) {
-    const pitches = new Set((reference?.at(time) || []).filter(hz => hz > 0 && Number.isFinite(hz)).map(hz => Math.round(freqToSemitone(hz))));
-    for (const pitch of active.keys()) if (!pitches.has(pitch)) active.delete(pitch);
-    for (const pitch of pitches) {
-      let bar = active.get(pitch);
-      if (!bar) { bar = { start: time, end: time, pitch }; bars.push(bar); active.set(pitch, bar); }
-      bar.end = Math.min(end, time + step);
-    }
+    appendBars(reference, time, Math.min(end, time + step), bars, active);
   }
   return bars;
+}
+function appendBars(reference, time, end, bars, active) {
+  const pitches = new Set((reference?.at(time) || []).filter(hz => hz > 0 && Number.isFinite(hz)).map(hz => Math.round(freqToSemitone(hz))));
+  for (const pitch of active.keys()) if (!pitches.has(pitch)) active.delete(pitch);
+  for (const pitch of pitches) {
+    let bar = active.get(pitch);
+    if (!bar) { bar = { start: time, end: time, pitch }; bars.push(bar); active.set(pitch, bar); }
+    bar.end = end;
+  }
+}
+
+// Build each reference's target geometry once. Live references append only
+// fully available steps; a seek or visibility toggle reuses the same geometry.
+export class TargetBarCache {
+  constructor() { this.references = new WeakMap(); }
+  get(reference, start, end) {
+    if (!reference) return [];
+    let cached = this.references.get(reference);
+    if (!cached) {
+      cached = { bars: [], active: new Map(), steps: 0 };
+      this.references.set(reference, cached);
+    }
+    const step = .04, through = reference.end ?? end;
+    const count = reference.complete === false ? Math.floor(through / step) : Math.ceil(through / step);
+    while (cached.steps < count) {
+      const time = cached.steps++ * step;
+      appendBars(reference, time, Math.min(through, cached.steps * step), cached.bars, cached.active);
+    }
+    return cached.bars.filter(bar => bar.end >= start && bar.start <= end);
+  }
 }
 export function staffRange(bars, singers, time) {
   const pitches = bars.filter(b => b.end >= time - .2 && b.start <= time + 1.5).map(b => b.pitch);
@@ -37,6 +61,7 @@ export function staffRange(bars, singers, time) {
 export class PitchStaff {
   constructor(container, canvas) {
     Object.assign(this, { container, canvas });
+    this.targets = new TargetBarCache();
     this.enabled = false;
     this.reset();
   }
@@ -46,7 +71,7 @@ export class PitchStaff {
     if (!this.enabled) return;
     const now = time - latency;
     if (this.lastTime !== null && (now < this.lastTime || now - this.lastTime > .5)) this.reset();
-    const bars = targetBars(reference, now - 2, now + 6);
+    const bars = this.targets.get(reference, now - 2, now + 6);
     const range = staffRange(bars, singers, now);
     this.center = this.center === null ? range.center : this.center + (range.center - this.center) * .25;
     // Expand immediately for octave leaps; contract gently between phrases.

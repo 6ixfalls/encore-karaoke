@@ -19,7 +19,7 @@ Open [localhost:3000](http://localhost:3000). The dashboard has two choices: **L
 
 The TV presentation reuses the desktop's standby, player, QR, menu and queue styles. Core assets are served locally. Each tab receives a temporary participant token stored in browser session storage so the main screen and controllers remain separate, even on the same device. This is room membership, with no account or password. Only the room's original main screen can start playback; there is no display handoff. A heartbeat pauses output on disconnect. Reloading the main tab preserves its room while this server process is running; after a missed heartbeat, the screen reconnects automatically. If the browser requires audio activation after a reload, any click or keypress unlocks it.
 
-The application requires no writable persistent volume. Rooms, codes, participant tokens, scores, retry records and rate limits disappear on restart. Media is processed through bounded streams in memory. yt-dlp disk caching is disabled. Model weights are installed in the container image. Recordings stay in browser memory until downloaded. The optional Caddy proxy retains its own certificate/CA data separately.
+The application keeps no durable room data. Rooms, codes, participant tokens, scores, retry records and rate limits disappear on restart. Media is processed through bounded streams, with prepared videos held in temporary disk storage for seeking. Compose provides a disk-backed `encore-media` scratch volume so long songs do not fill the RAM-backed `/tmp`. Playback retirement deletes its files, and startup clears abandoned media from the dedicated storage directory. yt-dlp disk caching is disabled. Model weights are installed in the container image. Recordings stay in browser memory until downloaded. The optional Caddy proxy retains its own certificate/CA data separately.
 
 For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_BASE_URL`; a LAN IP served over HTTP is rejected. Follow the [operator guide](docs/server-hosted-operations.md) for Docker and local DNS/TLS.
 
@@ -32,6 +32,7 @@ For phones and other computers, configure a trusted HTTPS hostname and `PUBLIC_B
 | `FFMPEG_PATH` | FFmpeg executable (default `ffmpeg`); live decoding and video/instrumental muxing |
 | `SEPARATION_PYTHON` | Python environment with `server/separation-requirements.txt` installed (default `python3`) |
 | `SEPARATION_DEVICE` | `cpu` by default; `cuda` or `cuda:N` for NVIDIA inference; `mps` follows Nightingale's CPU fallback |
+| `SEPARATION_STORAGE_DIR` | Dedicated writable media scratch directory; defaults to OS temp locally, `/var/cache/encore-media` in the image. Use disk storage with at least 1 GiB free plus headroom; one server process per directory. Startup removes `encore-media-*` subdirectories. |
 | `FFMPEG_VIDEO_MODE` | `copy` by default (no video transcoding); `nvidia` enables CUDA video decoding and H.264 NVENC encoding |
 | `FFMPEG_GPU` | NVIDIA video device index (default `0`), independent of the Demucs device |
 | `WEB_DIR`                       | `./dist/web`; compiled browser assets                                                    |

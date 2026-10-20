@@ -14,6 +14,7 @@ RUN npm run build
 FROM node:24-bookworm-slim
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 ENV NODE_ENV=production WEB_DIR=/app/dist/web PORT=3000 \
+    SEPARATION_STORAGE_DIR=/var/cache/encore-media \
     PATH="/opt/venv/bin:$PATH" HF_HOME=/opt/models TORCH_HOME=/opt/models PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -31,6 +32,7 @@ ENV HF_HUB_OFFLINE=1
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /var/cache/encore-media && chown node:node /var/cache/encore-media
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"

@@ -60,7 +60,7 @@ export class PerformanceTools {
     }
   }
   beginLiveReference() {
-    const reference = { duration: 0, through: 0, complete: false, pitches: [], step: 1024 / 44100 };
+    const reference = { duration: 0, end: 0, through: 0, complete: false, pitches: [], step: 1024 / 44100 };
     reference.at = time => {
       const pitch = time >= 0 ? reference.pitches[Math.floor(time / reference.step)] : null;
       return pitch == null ? [] : [pitch];
@@ -80,7 +80,8 @@ export class PerformanceTools {
       snapshot.singable > 600 || snapshot.step !== 1024 / 44100 ||
       snapshot.pitches.some(pitch => pitch !== null && (!Number.isFinite(pitch) || pitch < 80 || pitch > 1000)))
       throw new Error("invalid_live_reference");
-    Object.assign(reference, { pitches: snapshot.pitches, duration: snapshot.singable, through: snapshot.through, complete: snapshot.complete });
+    Object.assign(reference, { pitches: snapshot.pitches, end: snapshot.pitches.length * snapshot.step,
+      duration: snapshot.singable, through: snapshot.through, complete: snapshot.complete });
     this.referenceScore.scorer.totalSingable = Math.max(0.5, reference.duration);
     this.flushLiveScores();
     this.status(snapshot.complete ? "Vocal separation complete. Reference scoring is ready." :

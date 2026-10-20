@@ -7,12 +7,15 @@ services:
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the trusted HTTPS origin}
       SEPARATION_DEVICE: ${SEPARATION_DEVICE:-cpu}
+      SEPARATION_STORAGE_DIR: /var/cache/encore-media
       FFMPEG_VIDEO_MODE: ${FFMPEG_VIDEO_MODE:-copy}
       FFMPEG_GPU: ${FFMPEG_GPU:-0}
       TRUSTED_PROXIES: ${ENCORE_PROXY_IP:-172.30.254.2}
     read_only: true
-    # One prepared instrumental (capped at 1 GiB) plus processing scratch space.
+    # Processing scratch stays in RAM; prepared videos use host disk space.
     tmpfs: ["/tmp:size=1200m,noexec,nosuid"]
+    volumes:
+      - encore-media:/var/cache/encore-media
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     mem_limit: 6g
@@ -36,6 +39,7 @@ services:
       encore:
         condition: service_healthy
 volumes:
+  encore-media:
   caddy-data:
   caddy-config:
 networks:

@@ -1,6 +1,6 @@
 # Stateless server operations
 
-Encore needs one Node.js server process with no persistent application volume or database. All rooms, pairing codes, participants, queues, current playback, recent scores, command retries and rate limits exist only in memory. A restart ends all rooms; visitors launch karaoke again and phones join the new code. Running multiple independent replicas requires routing each room and its requests to the same process.
+Encore needs one Node.js server process with no durable application data or database. All rooms, pairing codes, participants, queues, current playback, recent scores, command retries and rate limits exist only in memory. A restart ends all rooms; visitors launch karaoke again and phones join the new code. Running multiple independent replicas requires routing each room and its requests to the same process.
 
 ## Start with Docker
 
@@ -9,7 +9,9 @@ Encore needs one Node.js server process with no persistent application volume or
 3. Open the main screen and click **Launch karaoke**. Its click enables browser audio, creates a room and shows a stable six-digit code and QR.
 4. On phones, choose **Control** and enter the code, or scan the QR to join automatically. No account, password, admin credential or YouTube API key is required.
 
-The application container runs with a read-only filesystem and temporary `/tmp`. It mounts no library, data or media-cache volumes. yt-dlp searches and resolves remote media with its disk cache disabled. FFmpeg and Demucs process bounded streams; instrumental fragments are retained in a private temporary file until the playback is retired. Model weights are installed at image build time. NVIDIA deployment options remain in `compose.gpu.yaml`.
+The application container runs with a read-only filesystem, RAM-backed `/tmp` for processing scratch, and a disk-backed `encore-media` scratch volume at `/var/cache/encore-media`. yt-dlp searches and resolves remote media with its disk cache disabled. FFmpeg and Demucs process bounded streams; instrumental fragments are retained in a private temporary file until playback is retired. Model weights are installed at image build time. NVIDIA deployment options remain in `compose.gpu.yaml`.
+
+Prepared videos are capped at 1 GiB per job. Keep at least that much free host disk space plus headroom. `separation_storage_full` means the media filesystem has exhausted space or quota; rebuilding and recreating the container with the updated Compose file moves prepared media out of `/tmp`. For custom deployments, mount writable disk storage owned by the image's `node` user at `/var/cache/encore-media`, or set `SEPARATION_STORAGE_DIR` to a dedicated writable directory. Local Node runs use OS temp unless this variable is set. Each configured directory must belong to one server process: startup deletes its `encore-media-*` subdirectories to reclaim crash leftovers. This scratch volume contains no recoverable rooms or scores.
 
 Caddy's `caddy-data` and `caddy-config` volumes belong to the HTTPS proxy. Protect its CA private key. For Caddy's local CA, export its public root certificate with `docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt ./encore-root.crt` and install/trust it on the main screen and phones. Configure DNS to resolve the hostname to your server. Do not distribute the private CA key.
 

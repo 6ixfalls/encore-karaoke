@@ -35,6 +35,7 @@ export function configuration(env: NodeJS.ProcessEnv = process.env) {
     ffmpeg: env.FFMPEG_PATH || "ffmpeg",
     python: env.SEPARATION_PYTHON || "python3",
     separationDevice,
+    separationStorageDir: env.SEPARATION_STORAGE_DIR ? path.resolve(env.SEPARATION_STORAGE_DIR) : undefined,
     ffmpegVideoMode,
     ffmpegGpu,
     maxSeparations: 1,

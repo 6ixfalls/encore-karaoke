@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { PassThrough, Readable, type Writable } from "node:stream";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, openSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
+import { mkdirSync, readdirSync, mkdtempSync, openSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
 import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +14,10 @@ import { requireValue, Fault } from "../shared/contracts.js";
 import { Lyrics, type TimedLyrics } from "./lyrics.js";
 
 const RATE = 44100, WINDOW = 2048, HOP = 1024;
+function storageError(error: NodeJS.ErrnoException) {
+  return ["ENOSPC", "EDQUOT"].includes(error.code || "") ? "separation_storage_full"
+    : ["EACCES", "EPERM", "EROFS"].includes(error.code || "") ? "separation_storage_unwritable" : "separation_storage_failed";
+}
 export class VocalFrames {
   pitches: (number | null)[] = [];
   samples = 0;
@@ -62,7 +66,17 @@ export type Launcher = (command: string, args: string[], options: Parameters<typ
 export class Separations {
   jobs = new Map<string, SeparationJob>();
   constructor(private config: Configuration, private youtube: Pick<YouTube, "resolve">, private launch: Launcher = spawn,
-    private lyrics?: Lyrics) {}
+    private lyrics?: Lyrics) {
+    if (config.separationStorageDir) {
+      // This dedicated directory belongs to one server process. Remove media
+      // orphaned by a crash before admitting any new playback jobs.
+      mkdirSync(config.separationStorageDir, { recursive: true, mode: 0o700 });
+      for (const entry of readdirSync(config.separationStorageDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name.startsWith("encore-media-"))
+          rmSync(join(config.separationStorageDir, entry.name), { recursive: true, force: true });
+      }
+    }
+  }
   async create(roomId: string, playbackId: string, deviceId: string, videoId: string, current: () => boolean) {
     for (const job of this.jobs.values()) {
       if (!job.current()) this.stop(job.id);
@@ -71,9 +85,16 @@ export class Separations {
     if (existing && existing.current() && existing.state !== "failed") return existing;
     if (existing) this.stop(existing.id);
     requireValue(this.jobs.size < (this.config.maxSeparations || 1), "separation_busy", 503);
-    const directory = mkdtempSync(join(tmpdir(), "encore-media-"));
-    const file = join(directory, "backing.mp4");
-    const writer = createWriteStream(file, { fd: openSync(file, "wx", 0o600) });
+    let directory: string | undefined;
+    let file: string, writer: WriteStream;
+    try {
+      directory = mkdtempSync(join(this.config.separationStorageDir || tmpdir(), "encore-media-"));
+      file = join(directory, "backing.mp4");
+      writer = createWriteStream(file, { fd: openSync(file, "wx", 0o600) });
+    } catch (error) {
+      if (directory) rmSync(directory, { recursive: true, force: true });
+      throw new Fault(storageError(error as NodeJS.ErrnoException), 502);
+    }
     const job: SeparationJob = { id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
       processes: [], controller: new AbortController(), frames: new VocalFrames(), state: "loading", claimed: false,
       directory, file, writer, ready: false,
@@ -89,8 +110,7 @@ export class Separations {
     });
     writer.on("error", (error: NodeJS.ErrnoException) => {
       if (!this.jobs.has(job.id) || job.state === "failed") return;
-      const code = ["ENOSPC", "EDQUOT"].includes(error.code || "") ? "separation_storage_full"
-        : ["EACCES", "EPERM", "EROFS"].includes(error.code || "") ? "separation_storage_unwritable" : "separation_storage_failed";
+      const code = storageError(error);
       console.warn("Temporary media write failed", { code: error.code });
       this.fail(job, code);
     });

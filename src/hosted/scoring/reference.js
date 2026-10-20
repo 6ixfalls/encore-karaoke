@@ -14,7 +14,7 @@ export function midiReference(notes) {
     duration += Math.max(0, stop - Math.max(start, end));
     end = Math.max(end, stop);
   }
-  return { duration, at: time => notes.filter(n => time >= n.time && time < n.time + n.duration).map(n => midiHz(n.pitch)) };
+  return { duration, end, at: time => notes.filter(n => time >= n.time && time < n.time + n.duration).map(n => midiHz(n.pitch)) };
 }
 
 /** Same 50%-overlap singable-time scan as Nightingale, yielding between batches.
@@ -34,7 +34,7 @@ export async function vocalReference(buffer, current = () => true) {
     if (pitch !== null) duration += step;
     if (pitches.length % 128 === 0) await new Promise(resolve => setTimeout(resolve, 0));
   }
-  return { duration, at: time => {
+  return { duration, end: pitches.length * step, at: time => {
     const pitch = time >= 0 ? pitches[Math.floor(time / step)] : null;
     return pitch == null ? [] : [pitch];
   } };

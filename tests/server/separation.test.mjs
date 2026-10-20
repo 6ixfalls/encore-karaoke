@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { PassThrough } from "node:stream";
 import { VocalFrames, Separations } from "../../dist/server/separation.js";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import { configuration } from "../../dist/server/config.js";
 
 export function fakeProcesses() {
@@ -160,6 +162,32 @@ test("prepared media is retained for pause and seek and removed on retirement", 
   assert.equal(readFileSync(job.file, "utf8"), "instrumental");
   assert.equal(await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true), job);
   assert.equal(children.length, 3);
+  jobs.stop(job.id);
+  assert.equal(existsSync(job.directory), false);
+});
+
+test("prepared media uses dedicated storage and startup removes crash leftovers", async t => {
+  const root = mkdtempSync(join(tmpdir(), "encore-storage-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, "media");
+  const config = configuration({ SEPARATION_STORAGE_DIR: directory });
+  const { children, launch } = fakeProcesses();
+  let jobs = new Separations(config, { resolve: async () => source }, launch);
+  const orphan = join(directory, "encore-media-crashed");
+  mkdirSync(orphan); writeFileSync(join(orphan, "backing.mp4"), "abandoned");
+  writeFileSync(join(directory, "keep.txt"), "unrelated");
+  jobs.close();
+  jobs = new Separations(config, { resolve: async () => source }, launch);
+  t.after(() => jobs.close());
+  assert.equal(existsSync(orphan), false);
+  assert.equal(existsSync(join(directory, "keep.txt")), true);
+  const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+  assert.equal(dirname(job.directory), directory);
+  const finished = once(job.writer, "finish");
+  children[2].stdout.end("prepared video on disk");
+  children[2].emit("close", 0);
+  await finished;
+  assert.equal(readFileSync(job.file, "utf8"), "prepared video on disk");
   jobs.stop(job.id);
   assert.equal(existsSync(job.directory), false);
 });

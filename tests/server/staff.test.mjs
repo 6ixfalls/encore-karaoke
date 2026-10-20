@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { noteName, staffPosition, staffRange, targetBars, PitchStaff } from "../../src/hosted/scoring/staff.js";
+import { noteName, staffPosition, staffRange, targetBars, TargetBarCache, PitchStaff } from "../../src/hosted/scoring/staff.js";
 import { midiReference } from "../../src/hosted/scoring/reference.js";
 import { PerformanceTools } from "../../src/hosted/performance.js";
 
@@ -27,6 +27,44 @@ function view() {
   const canvas = { clientWidth: 960, clientHeight: 180, getContext: () => ctx };
   return new PitchStaff(container, canvas);
 }
+test("long-song target geometry is calculated once and reused across seeks and toggles", () => {
+  const reference = midiReference([{ time: 0, duration: 600, pitch: 69 }]);
+  let calls = 0;
+  const at = reference.at;
+  reference.at = time => { calls++; return at(time); };
+  const staff = view(); staff.setEnabled(true);
+  const frame = { time: 1, reference, singers: [], active: true };
+  staff.render(frame);
+  const initial = calls;
+  assert.equal(initial, 15001); // 15,000 target steps plus the current marker
+  staff.render({ ...frame, time: 590 });
+  staff.setEnabled(false); staff.setEnabled(true);
+  staff.render({ ...frame, time: 1 });
+  assert.equal(calls, initial + 2); // only the live marker is read per render
+  assert.deepEqual(staff.targets.get(reference, 300, 310), [{ start: 0, end: 600, pitch: 69 }]);
+});
+test("live target geometry appends new data once, joining notes and preserving gaps", () => {
+  const cache = new TargetBarCache();
+  let calls = 0;
+  const reference = { end: .105, complete: false, at: time => {
+    calls++;
+    assert.ok(time < reference.end);
+    return time < .12 || time >= .2 ? [440] : [];
+  } };
+  assert.deepEqual(cache.get(reference, 0, 8), [{ start: 0, end: .08, pitch: 69 }]);
+  assert.equal(calls, 2);
+  cache.get(reference, 0, 8); assert.equal(calls, 2);
+  reference.end = .225;
+  assert.deepEqual(cache.get(reference, 0, 8), [{ start: 0, end: .12, pitch: 69 }]);
+  assert.equal(calls, 5);
+  reference.complete = true;
+  const bars = cache.get(reference, 0, 8);
+  assert.equal(bars.length, 2);
+  assert.deepEqual(bars[1], { start: .2, end: .225, pitch: 69 });
+  cache.get(reference, 0, 8); assert.equal(calls, 6);
+  assert.deepEqual(cache.get(midiReference([{ time: 0, duration: 1, pitch: 60 }]), 0, 1),
+    [{ start: 0, end: 1, pitch: 60 }]);
+});
 test("optional guide compensates latency and clears trails on seeks, silence and track changes", () => {
   const staff = view();
   const frame = { time: .5, reference: guide, singers: [{ id: "one", pitch: 60 }], active: true, latency: .1 };
