@@ -50,7 +50,7 @@ The Container GitHub Actions workflow runs the build, lint, and tests before bui
 npm run build
 npm run test:types
 npm test
-# Verify Python dependencies and model preload on both Linux architectures:
+# Verify Python dependencies and model preload on Linux AMD64:
 npm run test:container
 # Rebuild browser edits with npm run build; watch TypeScript server edits:
 npm run dev
@@ -58,7 +58,7 @@ npm run dev
 
 Tests cover in-memory reset and expiry, one-main-screen ownership, code/QR joining, three concurrent Socket.IO controllers, reservation/rate limits, command retry deduplication, playback fencing, Origin checks, yt-dlp extraction and live separation. Physical audio timing, phone compatibility and low-end performance still need device testing.
 
-`npm run test:container` requires a running Docker daemon and a Buildx builder with Linux AMD64 and ARM64 support (native workers or emulation). It builds the complete production image for both CI platforms, including Python packages and the Demucs model preload, without publishing images. Run it after changes to the Dockerfile or Python dependencies; `npm test` alone does not check container dependencies.
+`npm run test:container` requires a running Docker daemon and a Buildx builder with Linux AMD64 support (a native worker or emulation). It builds the complete production image for the CI platform, including Python packages and the Demucs model preload, without publishing images. GitHub Actions builds and publishes only Linux AMD64 images. Run this check after changes to the Dockerfile or Python dependencies; `npm test` alone does not check container dependencies.
 
 ## Project layout
 

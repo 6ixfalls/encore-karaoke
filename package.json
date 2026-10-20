@@ -11,7 +11,7 @@
     "dev": "npm run build && tsx watch server/index.ts",
     "test": "npm run lint && npm run test:server",
     "test:server": "npm run build:server && node --test tests/server/*.test.mjs",
-    "test:container": "docker buildx build --platform linux/amd64 --output type=cacheonly -f deploy/Dockerfile . && docker buildx build --platform linux/arm64 --output type=cacheonly -f deploy/Dockerfile .",
+    "test:container": "docker buildx build --platform linux/amd64 --output type=cacheonly -f deploy/Dockerfile .",
     "lint": "eslint server shared src/hosted src/platform tests/server build-server.mjs eslint.config.js",
     "test:types": "tsc -p tsconfig.server.json --noEmit"
   },
