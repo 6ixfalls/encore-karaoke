@@ -44,9 +44,17 @@ jobs:
         run: npm test
 
   build:
-    name: Build and publish
+    name: Build and publish (${{ matrix.variant }})
     needs: checks
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            torch-index-url: https://download.pytorch.org/whl/cpu
+          - variant: gpu
+            torch-index-url: https://download.pytorch.org/whl/cu128
     permissions:
       contents: read
       packages: write
@@ -75,11 +83,16 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: latest=false
+          # Keep existing unqualified tags as aliases for the CPU image.
           tags: |
-            type=sha,prefix=sha-,format=short
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short,suffix=-${{ matrix.variant }}
+            type=ref,event=branch,suffix=-${{ matrix.variant }}
+            type=ref,event=pr,suffix=-${{ matrix.variant }}
+            type=raw,value=latest-${{ matrix.variant }},enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short,enable=${{ matrix.variant == 'cpu' }}
+            type=ref,event=branch,enable=${{ matrix.variant == 'cpu' }}
+            type=ref,event=pr,enable=${{ matrix.variant == 'cpu' }}
+            type=raw,value=latest,enable=${{ matrix.variant == 'cpu' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Build and publish image
         uses: docker/build-push-action@v7
@@ -87,11 +100,13 @@ jobs:
           context: .
           file: ./deploy/Dockerfile
           platforms: linux/amd64
+          build-args: |
+            TORCH_INDEX_URL=${{ matrix.torch-index-url }}
           push: ${{ env.PUSH_IMAGE == 'true' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           annotations: ${{ steps.metadata.outputs.annotations }}
-          cache-from: type=gha,scope=encore-container
-          cache-to: type=gha,mode=max,scope=encore-container
+          cache-from: type=gha,scope=encore-container-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=encore-container-${{ matrix.variant }}
           provenance: ${{ env.PUSH_IMAGE == 'true' && 'mode=max' || 'false' }}
           sbom: ${{ env.PUSH_IMAGE == 'true' }}
