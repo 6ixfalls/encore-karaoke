@@ -25,6 +25,11 @@ body.tv #message { position: fixed; top: 16px; left: 20%; right: 20%; z-index: 1
 #tv-appliance #score { position: absolute; top: 98px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border: 1px solid #fff3; background: #000a; border-radius: 8px; font: 600 22px Rajdhani, sans-serif; color: #ffd700; margin: 0; }
 #tv-appliance #score:empty { display: none; }
 body.tv #lyrics, body.tv #next-lyrics { display: none; }
+#tv-settings-open { position: absolute; right: 1rem; bottom: 1rem; z-index: 25; background: #080810cc; }
+#tv-settings { width: min(900px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; color: white; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+#tv-settings::backdrop { background: #000b; }
+#tv-settings > h2 { margin-top: 0; }
+#tv-settings #display-controls { margin-top: 20px; }
 #tv-appliance.mode-menu:not(.mode-player) #play-controls { display: none; }
 #tv-appliance .top-bar-container { z-index: 20; }
 #tv-appliance .info-bar-content { display: block; line-height: 48px; }

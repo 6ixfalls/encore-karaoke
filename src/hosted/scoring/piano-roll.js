@@ -62,13 +62,25 @@ export class HostedPianoRoll {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     const page = pageLayout(width, time, this.notes);
-    const { min = 42, max = 90 } = this.range || {};
+    const present = new Set(singers.map(s => s.id));
+    for (const id of this.trails.keys()) if (!present.has(id)) this.trails.delete(id);
+    let { min = 42, max = 90 } = this.range || {};
+    // Keep actual singer octaves and retained trails visible alongside the guide.
+    for (const singer of singers) {
+      let trail = this.trails.get(singer.id) || [];
+      if (active && trail.at(-1)?.time !== time) trail.push({ time, pitch: singer.pitch });
+      trail = trail.filter(p => p.time >= page.start - 1).slice(-1200);
+      this.trails.set(singer.id, trail);
+      for (const point of [...trail, singer]) {
+        if (point.pitch === null) continue;
+        min = Math.min(min, point.pitch - 3);
+        max = Math.max(max, point.pitch + 3);
+      }
+    }
     const pitchY = pitch => Math.max(8, Math.min(height - 8, height - (pitch - min) / (max - min) * height));
     ctx.beginPath(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.15)";
     for (let i = 1; i < 8; i++) { ctx.moveTo(0, height / 8 * i); ctx.lineTo(width, height / 8 * i); }
     ctx.stroke();
-    const present = new Set(singers.map(s => s.id));
-    for (const id of this.trails.keys()) if (!present.has(id)) this.trails.delete(id);
     let currentStatus = "neutral";
     for (const note of this.notes) {
       if (note.startTime > page.end) break;
@@ -100,10 +112,7 @@ export class HostedPianoRoll {
       ctx.fillStyle = color; ctx.fillRect(page.playhead - size / 2, 0, size, height);
     }
     singers.forEach((singer, index) => {
-      let trail = this.trails.get(singer.id) || [];
-      if (active && trail.at(-1)?.time !== time) trail.push({ time, pitch: singer.pitch });
-      trail = trail.filter(p => p.time >= page.start - 1).slice(-1200);
-      this.trails.set(singer.id, trail);
+      const trail = this.trails.get(singer.id);
       const color = singers.length > 1 ? ["#89cff0", "#f9a8d4", "#c4b5fd", "#86efac"][index % 4]
         : PALETTE[currentStatus][0];
       ctx.beginPath(); let previous;

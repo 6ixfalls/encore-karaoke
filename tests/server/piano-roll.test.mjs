@@ -44,3 +44,26 @@ test('guide preview draws future bars without a microphone; singer history freez
   roll.reset();
   assert.equal(roll.trails.size, 0);
 });
+
+test('singers above and below the guide retain distinct pitches without clipping', () => {
+  const markers = [], paths = [];
+  const ctx = new Proxy({
+    arc: (x, y) => markers.push(y),
+    moveTo: (x, y) => { if (x > 0 && x < 1200) paths.push(y); },
+    lineTo: (x, y) => { if (x > 0 && x < 1200) paths.push(y); },
+    createLinearGradient: () => ({ addColorStop() {} }),
+  }, { get: (target, name) => target[name] || (() => {}) });
+  const roll = new HostedPianoRoll({ clientWidth: 1200 }, { getContext: () => ctx });
+  const frame = { reference: midiReference([{ time: 0, duration: 4, pitch: 69 }]), active: true };
+  roll.render({ ...frame, time: 1, singers: [{ id: 'low', pitch: 57 }, { id: 'high', pitch: 81 }] });
+  assert.equal(roll.notes[0].hitStatus, 'hit');
+  assert.ok(markers.every(y => y > 8 && y < 242));
+  assert.ok(markers[0] > markers[2]);
+  markers.length = 0;
+  paths.length = 0;
+  roll.render({ ...frame, time: 1.05, singers: [{ id: 'low', pitch: 58 }, { id: 'high', pitch: 80 }] });
+  assert.ok(markers.every(y => y > 8 && y < 242));
+  assert.ok(paths.every(y => y > 8 && y < 242));
+  assert.ok(paths[0] > markers[0]);
+  assert.ok(paths[2] < markers[2]);
+});

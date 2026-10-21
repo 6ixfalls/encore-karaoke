@@ -22,7 +22,7 @@ The live scoring guide is enabled by default on the TV. The TV is display-only; 
 
 Each enabled TV or phone microphone supplies an independent colored trail and live marker. Silence breaks the trail. The guide range fits the available melody, while the final Nightingale score keeps its octave-independent comparison. Pausing freezes the timeline; seeking or changing songs clears pitch trails. Missing references and instrumental passages leave the target bars empty. The guide does not request microphone access.
 
-Phone microphone controls remain on each connected controller. The TV guide does not request microphone access. Microphone-delay compensation also aligns live pitch feedback to the reference.
+Select **Microphone & recording** on the TV to enable its microphone, adjust microphone delay, toggle the guide, or record and download performances. Close the settings with **Back to TV** or Escape. Phone microphone controls remain on each connected controller. The TV guide does not request microphone access. Microphone-delay compensation also aligns live pitch feedback to the reference.
 
 ## Timed lyrics
 

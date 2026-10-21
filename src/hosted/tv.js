@@ -21,10 +21,27 @@ export function mountTV() {
   shell.querySelector(".player-ui").append(lyricSection, $("score"));
   shell.querySelector(".qr-image-wrapper").append($("qr"), $("manual-code"));
   $("progress").hidden = true;
-  // Shared event handlers still need these elements, but the TV is display-only.
+  const settingsButton = document.createElement("button");
+  settingsButton.id = "tv-settings-open";
+  settingsButton.textContent = "Microphone & recording";
+  settingsButton.setAttribute("aria-haspopup", "dialog");
+  settingsButton.setAttribute("aria-controls", "tv-settings");
+  const settings = document.createElement("dialog");
+  settings.id = "tv-settings";
+  settings.setAttribute("aria-labelledby", "tv-settings-title");
+  const title = document.createElement("h2");
+  title.id = "tv-settings-title";
+  title.textContent = "Microphone, scoring & recording";
+  const close = document.createElement("button");
+  close.textContent = "Back to TV";
+  close.addEventListener("click", () => settings.close());
+  settingsButton.addEventListener("click", () => settings.showModal());
+  settings.append(title, close, $("display-controls"));
+  shell.append(settingsButton, settings);
+  // Playback and song selection remain on the connected controllers.
   const controls = document.createElement("section");
   controls.hidden = true;
-  controls.append($("play-controls"), $("display-controls"), $("host-tools"), document.querySelector("#room > .columns"));
+  controls.append($("play-controls"), $("host-tools"), document.querySelector("#room > .columns"));
   $("room").append(controls);
   document.querySelector(".room-heading").hidden = true;
   return (room) => {
