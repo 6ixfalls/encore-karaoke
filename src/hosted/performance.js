@@ -22,6 +22,7 @@ export class PerformanceTools {
     this.samples = 0; this.credit = 0; this.mode = "stability"; this.previousPitch = null;
     this.referenceScore = null; this.reference = null; this.guideNotes = null;
     this.liveReference = null; this.pendingScores = [];
+    this.displayReference = null;
     this.staff?.reset();
   }
   setLatency(milliseconds) {
@@ -82,10 +83,25 @@ export class PerformanceTools {
       throw new Error("invalid_live_reference");
     Object.assign(reference, { pitches: snapshot.pitches, end: snapshot.pitches.length * snapshot.step,
       duration: snapshot.singable, through: snapshot.through, complete: snapshot.complete });
+    this.updateDisplayReference();
     this.referenceScore.scorer.totalSingable = Math.max(0.5, reference.duration);
     this.flushLiveScores();
     this.status(snapshot.complete ? "Vocal separation complete. Reference scoring is ready." :
       `Separating ahead of playback: ${Math.floor(snapshot.through)} seconds ready. Score is provisional.`);
+  }
+  setTranspose(semitones) {
+    if (this.transpose === semitones) return;
+    this.transpose = semitones;
+    this.updateDisplayReference();
+    this.staff?.reset();
+  }
+  updateDisplayReference() {
+    if (!this.reference) return;
+    const reference = this.reference, factor = 2 ** ((this.transpose || 0) / 12);
+    // Progress updates extend the same track; the roll uses identity to retain hit/miss colors.
+    Object.assign(this.displayReference ||= {}, reference, {
+      pitches: reference.pitches?.map(hz => hz === null ? null : hz * factor),
+      at: time => reference.at(time).map(hz => hz * factor) });
   }
   flushLiveScores() {
     while (this.pendingScores.length && this.pendingScores[0].time <= this.liveReference.through) {
@@ -117,7 +133,7 @@ export class PerformanceTools {
       }
       singers.push({ id, pitch: hz === null ? null : freqToSemitone(hz) });
     }
-    this.staff.render({ time: player.audio.currentTime, reference: this.reference, singers, active,
+    this.staff.render({ time: player.audio.currentTime, reference: this.displayReference || this.reference, singers, active,
       latency: this.latency });
   }
   async startMicrophone(player) {
@@ -142,7 +158,8 @@ export class PerformanceTools {
     try {
       this.input = this.context.createMediaStreamSource(stream);
       this.analyser = this.context.createAnalyser(); this.analyser.fftSize = 2048;
-      this.input.connect(this.analyser); // Microphone is never connected to speakers.
+      this.input.connect(this.analyser); // Scoring uses the dry microphone, independent of the effect chain.
+      if (player.mixer) this.input.connect(player.mixer.localInput);
       this.buffer = new Float32Array(2048);
     } catch (error) { this.stopMicrophone(); throw error; }
     this.status("Microphone enabled for scoring and recording on this display.");
@@ -181,10 +198,10 @@ export class PerformanceTools {
         this.status("Live reference delayed. A final melody score will not be published.");
         return;
       }
-      this.pendingScores.push({ time, hz, rate: player.audio.playbackRate });
+      this.pendingScores.push({ time, hz: hz === null ? null : hz / 2 ** ((this.transpose || 0) / 12), rate: player.audio.playbackRate });
       this.flushLiveScores();
     } else if (this.referenceScore) {
-      this.referenceScore.update(time, hz, this.latency, player.audio.playbackRate);
+      this.referenceScore.update(time, hz === null ? null : hz / 2 ** ((this.transpose || 0) / 12), this.latency, player.audio.playbackRate);
     } else {
       const credit = pitch === null || this.previousPitch === null ? null : Math.max(0, 1 - Math.abs(pitch - this.previousPitch) / 2);
       if (credit !== null) { this.credit += credit; this.samples++; }
@@ -202,9 +219,12 @@ export class PerformanceTools {
     const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
     const ctx = canvas.getContext("2d"), video = canvas.captureStream(20);
     const mix = this.context.createMediaStreamDestination();
-    this.input.connect(mix);
+    const mixedSource = player.mixer?.capture || player.gate;
+    if (!player.mixer) this.input.connect(mix);
     const musicDestination = this.context.createMediaStreamDestination();
-    player.gate.connect(mix); player.gate.connect(musicDestination);
+    mixedSource.connect(mix);
+    const musicSource = player.mixer?.musicCapture || player.gate;
+    musicSource.connect(musicDestination);
     const stream = new MediaStream([...video.getVideoTracks(), ...mix.stream.getAudioTracks()]);
     const sources = [["performance", stream], ["microphone", this.stream]];
     sources.push(["music", musicDestination.stream]);
@@ -239,8 +259,8 @@ export class PerformanceTools {
       this.recorders = recorders;
       this.recordingCleanup = () => {
         video.getTracks().forEach((track) => track.stop());
-        this.input?.disconnect(mix);
-        player.gate.disconnect(mix); player.gate.disconnect(musicDestination);
+        if (!player.mixer) this.input?.disconnect(mix);
+        mixedSource.disconnect(mix); musicSource.disconnect(musicDestination);
         mix.stream.getTracks().forEach((track) => track.stop());
         musicDestination?.stream.getTracks().forEach((track) => track.stop());
       };
@@ -252,8 +272,8 @@ export class PerformanceTools {
       this.recorders = null; this.drawFrame = null;
       this.recordingCleanup = null;
       video.getTracks().forEach((track) => track.stop());
-      this.input.disconnect(mix);
-      player.gate.disconnect(mix); player.gate.disconnect(musicDestination);
+      if (!player.mixer) this.input.disconnect(mix);
+      mixedSource.disconnect(mix); musicSource.disconnect(musicDestination);
       mix.stream.getTracks().forEach((track) => track.stop());
       musicDestination?.stream.getTracks().forEach((track) => track.stop());
       throw error;

@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default [
-  { ignores: ["dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "node_modules/**", "src/hosted/vendor/**"] },
   {
     ...eslint.configs.recommended,
     files: [
@@ -25,10 +25,10 @@ export default [
   },
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
-    files: ["server/**/*.ts", "shared/**/*.ts"],
+    files: ["server/**/*.ts", "shared/**/*.ts", "src/hosted/**/*.ts"],
     languageOptions: {
       ...config.languageOptions,
-      globals: globals.node,
+      globals: { ...globals.node, ...globals.browser },
     },
     rules: {
       ...config.rules,

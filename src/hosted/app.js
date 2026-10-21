@@ -7,6 +7,11 @@ import { mountController } from "./controller.js";
 import { RemoteMicrophone } from "./remote-microphone.js";
 import { youtubeId } from "./youtube.js";
 import { HostedLyrics } from "./lyrics.js";
+import { Presentation } from "./presentation.js";
+import { AudioMixer } from "./audio-mixer.js";
+import { loadPreferences } from "./preferences.js";
+import { mountSettings } from "./settings.js";
+import { Romanizer } from "./romanizer.js";
 
 const $ = (id) => document.getElementById(id);
 const services = new BrowserServices();
@@ -32,7 +37,7 @@ const tell = (value) => {
 };
 const showError = (error) =>
   tell(
-    `${error.message}${error.retryAfterMs ? ` — try again in ${Math.ceil(error.retryAfterMs / 1000)} seconds.` : ""}`,
+    `${error.message === "separation_storage_unwritable" ? "Media storage is not writable. Mount /var/cache/encore-media as a writable Kubernetes volume and set pod fsGroup: 1000." : error.message}${error.retryAfterMs ? ` — try again in ${Math.ceil(error.retryAfterMs / 1000)} seconds.` : ""}`,
   );
 const run = (fn) => async (event) => {
   event?.preventDefault();
@@ -57,6 +62,8 @@ const label = (value, className) => {
 const isHost = () => session?.role === "host";
 const recordingUrls = [];
 let lyricRenderer;
+let presentation;
+const preferences = loadPreferences();
 const staff = new PitchStaff($("pitch-staff"), $("pitch-canvas"));
 function setLiveScoring(enabled) {
   staff.setEnabled(enabled);
@@ -82,6 +89,11 @@ const performanceTools = new PerformanceTools({
   },
 });
 const player = new BrowserPlayer(services, {
+  createMixer: (context, source, gate) => {
+    const mixer = new AudioMixer(context, source, gate); mixer.apply(preferences); return mixer;
+  },
+  trackReady: (song) => presentation?.prepare(song) || 0,
+  finished: (song, score) => presentation?.finish(song, score),
   media: $("local-media"), performance: performanceTools,
   telemetry: (data) => {
     if (socket?.connected)
@@ -93,8 +105,12 @@ const player = new BrowserPlayer(services, {
     $("lyrics").textContent = current;
     $("next-lyrics").textContent = next;
     if (tv) {
-      lyricRenderer ||= new HostedLyrics($("lyrics-canvas"));
+      if (!lyricRenderer) {
+        lyricRenderer = new HostedLyrics($("lyrics-canvas"), new Romanizer(services, () => room?.id));
+        lyricRenderer.configure(preferences);
+      }
       lyricRenderer.update(player.lines, player.audio.currentTime);
+      presentation?.update();
       $("tv-appliance").classList.toggle("has-lyrics", !!(current || next));
     }
   },
@@ -104,6 +120,16 @@ const player = new BrowserPlayer(services, {
     if (room?.status !== "ended") setTimeout(() => startDisplay().catch(showError), 0);
   },
 });
+function mountPresentation() {
+  presentation = new Presentation($("tv-appliance"), preferences, player, () => player.update(room).catch(showError));
+  presentation.startup();
+  mountSettings($("display-controls"), preferences, async () => {
+    lyricRenderer?.configure(preferences);
+    if (player.mixer) { await player.mixer.initialize(); player.mixer.apply(preferences); }
+  }, showError);
+  $("tv-settings-title").textContent = "Encore settings";
+}
+if (tv) mountPresentation();
 async function command(type, payload = {}, revision) {
   const ack = await services.command(room.id, type, payload, revision);
   if (!socket?.connected && type !== "end" && session) await refreshRoom();
@@ -214,6 +240,7 @@ function render(snapshot) {
   $("now-title").textContent =
     room.current?.title || (tv ? "ENCORE KARAOKE" : "Waiting for your first song");
   $("now-artist").textContent = room.current?.artist || "";
+  $("transpose-value").textContent = `${room.transpose > 0 ? "+" : ""}${room.transpose || 0}`;
   $("playback-status").textContent =
     room.observed === "loading" ? "Preparing instrumental…" : room.current ? room.observed : "Ready to sing";
   $("progress").textContent = room.current
@@ -235,6 +262,7 @@ function render(snapshot) {
   for (const [id, value] of [
     ["volume", room.volume],
     ["tempo", room.tempo],
+    ["transpose", room.transpose || 0],
     ["guest-cap", room.policy.guestCap],
     ["room-cap", room.policy.roomCap],
   ])
@@ -327,7 +355,7 @@ $("lock").addEventListener(
   "click",
   run(() => command("lock", { locked: room.status !== "locked" })),
 );
-for (const action of ["volume", "tempo"])
+for (const action of ["volume", "tempo", "transpose"])
   $(action).addEventListener(
     "change",
     run(() => command(action, { value: Number($(action).value) })),
@@ -390,7 +418,8 @@ if (dashboard) {
     setLiveScoring(true);
     renderTV = mountTV();
     history.pushState(null, "", "/tv");
-    const audioReady = player.initialize();
+    mountPresentation();
+    const audioReady = player.initialize().then(() => player.mixer?.apply(preferences));
     await Promise.all([audioReady, boot()]);
     await connected();
     await startDisplay();

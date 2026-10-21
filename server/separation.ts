@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { PassThrough, Readable, type Writable } from "node:stream";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, mkdtempSync, openSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
+import { mkdirSync, readdirSync, mkdtempSync, openSync, closeSync, createWriteStream, rmSync, type WriteStream } from "node:fs";
 import { open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { tmpdir } from "node:os";
@@ -70,12 +70,25 @@ export class Separations {
     if (config.separationStorageDir) {
       // This dedicated directory belongs to one server process. Remove media
       // orphaned by a crash before admitting any new playback jobs.
-      mkdirSync(config.separationStorageDir, { recursive: true, mode: 0o700 });
-      for (const entry of readdirSync(config.separationStorageDir, { withFileTypes: true })) {
-        if (entry.isDirectory() && entry.name.startsWith("encore-media-"))
-          rmSync(join(config.separationStorageDir, entry.name), { recursive: true, force: true });
-      }
+      let probe: string | undefined;
+      try {
+        mkdirSync(config.separationStorageDir, { recursive: true, mode: 0o700 });
+        probe = mkdtempSync(join(config.separationStorageDir, "encore-probe-"));
+        closeSync(openSync(join(probe, "write-test"), "wx", 0o600));
+        for (const entry of readdirSync(config.separationStorageDir, { withFileTypes: true })) {
+          if (entry.isDirectory() && entry.name.startsWith("encore-media-"))
+            rmSync(join(config.separationStorageDir, entry.name), { recursive: true, force: true });
+        }
+      } catch (error) {
+        this.logStorageError(error as NodeJS.ErrnoException);
+        throw new Fault(storageError(error as NodeJS.ErrnoException), 502);
+      } finally { if (probe) rmSync(probe, { recursive: true, force: true }); }
     }
+  }
+  private logStorageError(error: NodeJS.ErrnoException) {
+    console.error("Temporary media storage unavailable", { path: this.config.separationStorageDir || tmpdir(),
+      code: error.code, uid: process.getuid?.(), gid: process.getgid?.(),
+      hint: "Mount a writable disk-backed emptyDir at SEPARATION_STORAGE_DIR; set pod fsGroup to the container group (1000)." });
   }
   async create(roomId: string, playbackId: string, deviceId: string, videoId: string, current: () => boolean) {
     for (const job of this.jobs.values()) {
@@ -92,6 +105,7 @@ export class Separations {
       file = join(directory, "backing.mp4");
       writer = createWriteStream(file, { fd: openSync(file, "wx", 0o600) });
     } catch (error) {
+      this.logStorageError(error as NodeJS.ErrnoException);
       if (directory) rmSync(directory, { recursive: true, force: true });
       throw new Fault(storageError(error as NodeJS.ErrnoException), 502);
     }

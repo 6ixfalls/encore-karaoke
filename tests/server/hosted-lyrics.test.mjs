@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HostedLyrics } from "../../src/hosted/lyrics.js";
+import { HostedLyrics } from "../../src/hosted/lyrics.ts";
+import { defaults } from "../../src/hosted/preferences.ts";
 
-function fixture(t) {
+function fixture(t, romanizer) {
   const frames = new Map();
   let nextFrame = 0;
   const context = () => new Proxy({
@@ -24,7 +25,7 @@ function fixture(t) {
     window: { innerWidth: 1280, devicePixelRatio: 2, addEventListener() {} },
     document: { createElement: canvas },
   });
-  const renderer = new HostedLyrics(canvas());
+  const renderer = new HostedLyrics(canvas(), romanizer);
   return { renderer, engine: renderer.engine, frames };
 }
 
@@ -80,4 +81,94 @@ test("refreshed lyric snapshots preserve fades and long non-Latin lines wrap", a
   await Promise.resolve();
   assert.equal(text(engine.renderableLines[0]), japanese);
   assert.ok(engine.renderableLines[0].rows.length > 1);
+});
+
+
+test("romanization can be disabled without leaving extra translated rows or making requests", async t => {
+  let calls = 0;
+  const { renderer, engine } = fixture(t, { romanize: async () => { calls++; return "nihongo"; } });
+  const lines = [{ time: 0, end: 5, text: "日本語" }];
+  renderer.configure({ ...defaults, romanization: false }); renderer.update(lines, 1);
+  await Promise.resolve(); assert.equal(calls, 0);
+  assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "");
+  renderer.configure({ ...defaults, romanization: true, lyricAlignment: "right" }); renderer.update(lines, 1);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(calls, 1); assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "nihongo");
+});
+
+test("settings changes preserve completed and pending romanization across toggles", async t => {
+  let calls = 0, resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const { renderer, engine } = fixture(t, { romanize: () => { calls++; return pending; } });
+  const preferences = structuredClone(defaults);
+  const cues = [{ time: 0, end: 60, text: "日本語" }];
+  renderer.configure(preferences); renderer.update(cues, 1);
+  for (let i = 0; i < 65; i++) {
+    preferences.micGain = 1 + i / 100;
+    renderer.configure(preferences); renderer.update(cues, 1);
+  }
+  assert.equal(calls, 1);
+  preferences.romanization = false;
+  renderer.configure(preferences); renderer.update(cues, 1);
+  resolve("nihongo"); await pending; await Promise.resolve();
+  assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "");
+  preferences.romanization = true;
+  renderer.configure(preferences); renderer.update(cues, 1);
+  for (let i = 0; i < 65; i++) {
+    preferences.lyricColor = i % 2 ? "blue" : "white";
+    renderer.configure(preferences); renderer.update(cues, 1);
+  }
+  assert.equal(calls, 1);
+  assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "nihongo");
+});
+
+test("temporary romanization failures retry visible lyrics with exponential backoff", async t => {
+  let now = 0, calls = 0;
+  t.mock.method(performance, "now", () => now);
+  const { renderer, engine } = fixture(t, { romanize: async () => {
+    if (++calls <= 2) throw new Error("network unavailable");
+    return "nihongo";
+  } });
+  const cues = [{ time: 0, end: 60, text: "日本語" }];
+  renderer.configure(structuredClone(defaults)); renderer.update(cues, 1);
+  await new Promise(setImmediate);
+  assert.equal(engine.romajiCache["日本語"], undefined);
+  for (let i = 0; i < 5; i++) {
+    renderer.configure(structuredClone(defaults)); renderer.update(cues, 1);
+  }
+  now = 999; engine.drawLyricsFrame(); assert.equal(calls, 1);
+  now = 1000; engine.drawLyricsFrame();
+  await new Promise(setImmediate);
+  assert.equal(calls, 2);
+  now = 2999; engine.drawLyricsFrame(); assert.equal(calls, 2);
+  now = 3000; engine.drawLyricsFrame();
+  await new Promise(setImmediate);
+  assert.equal(calls, 3);
+  assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "nihongo");
+  renderer.update([], 0); renderer.update(cues, 1);
+  await new Promise(setImmediate);
+  assert.equal(calls, 3);
+});
+
+test("romanization retries respect server delays and wait until lyrics are visible and enabled", async t => {
+  let now = 0, calls = 0;
+  t.mock.method(performance, "now", () => now);
+  const { renderer, engine } = fixture(t, { romanize: async () => {
+    if (++calls === 1) throw Object.assign(new Error("rate_limited"), { retryAfterMs: 5000 });
+    return "nihongo";
+  } });
+  const preferences = structuredClone(defaults), cues = [{ time: 0, end: 60, text: "日本語" }];
+  renderer.configure(preferences); renderer.update(cues, 1);
+  await new Promise(setImmediate);
+  now = 4999; engine.drawLyricsFrame(); assert.equal(calls, 1);
+  preferences.romanization = false;
+  renderer.configure(preferences); renderer.update(cues, 1);
+  now = 5000; engine.drawLyricsFrame(); assert.equal(calls, 1);
+  renderer.update([], 0);
+  preferences.romanization = true;
+  renderer.configure(preferences); engine.drawLyricsFrame(); assert.equal(calls, 1);
+  renderer.update(cues, 1);
+  await new Promise(setImmediate);
+  assert.equal(calls, 2);
+  assert.equal(engine.renderableLines[0].rows[0].romajiChunks[0].romaji, "nihongo");
 });

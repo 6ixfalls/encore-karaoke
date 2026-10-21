@@ -17,6 +17,7 @@ import type { ReadableStream } from "node:stream/web";
 import { YouTube } from "./youtube.js";
 import { Separations } from "./separation.js";
 import { Lyrics, YouTubeMusicLyrics, YouTubeCaptionLyrics } from "./lyrics.js";
+import { Romanization } from "./romanization.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
@@ -33,6 +34,7 @@ export function createApplication(store: Store, config: Configuration) {
     return req.session;
   };
   const youtube = new YouTube(config.ytDlp);
+  const romanization = new Romanization();
   const separations = new Separations(config, youtube, undefined,
     new Lyrics([new YouTubeMusicLyrics(), new YouTubeCaptionLyrics(config.ytDlp)]));
   let transfers = 0;
@@ -150,6 +152,13 @@ export function createApplication(store: Store, config: Configuration) {
     const grant = rooms.pairing(req.params.roomId, participant(req));
     const url = `${config.origin}/control#invite=${grant.invitation}`;
     res.json({ ...grant, url, qr: await QRCode.toDataURL(url, { margin: 2, width: 256 }) });
+  });
+  app.post("/api/rooms/:roomId/romanize", async (req, res) => {
+    const session = participant(req), room = rooms.room(req.params.roomId, session);
+    requireValue(room.screenId === session.id, "display_required", 403);
+    participants.throttle(`romanize:${session.id}`, 60);
+    participants.throttle("romanize:global", 120);
+    res.json({ text: await romanization.convert(text(req.body.text, 1000)) });
   });
   app.post("/api/rooms/:roomId/commands", (req, res) => {
     const ack = rooms.command(req.params.roomId, participant(req), req.body);

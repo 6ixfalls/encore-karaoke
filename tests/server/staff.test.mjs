@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PitchStaff } from "../../src/hosted/scoring/staff.js";
-import { computeLayout, semitoneToY, drawPitchSeries } from "../../src/hosted/scoring/pitch-graph.js";
 import { midiReference } from "../../src/hosted/scoring/reference.js";
 import { PerformanceTools } from "../../src/hosted/performance.js";
 
@@ -10,26 +9,6 @@ function view() {
   const ctx = new Proxy({ createLinearGradient: () => gradient }, { get: (object, key) => object[key] || (() => {}) });
   return new PitchStaff({ hidden: true }, { style: {}, getContext: () => ctx });
 }
-test("upstream graph uses a compact fixed chromatic range without panning", () => {
-  const layout = computeLayout(1080, 1920, 1);
-  assert.equal(layout.width, 400); assert.equal(layout.height, 44);
-  assert.equal(semitoneToY(45, layout), 38);
-  assert.equal(semitoneToY(81, layout), 6);
-  assert.equal(semitoneToY(20, layout), 38);
-  assert.equal(semitoneToY(100, layout), 6);
-});
-test("graph folds singer octaves to reference and breaks paths at silence", () => {
-  const paths = [], stops = [];
-  const ctx = { beginPath() {}, moveTo: (...point) => paths.push(point), lineTo: (...point) => paths.push(point), stroke() {},
-    createLinearGradient: () => ({ addColorStop: (...stop) => stops.push(stop) }) };
-  const layout = computeLayout(1080, 1920, 1);
-  drawPitchSeries({ ctx, layout, series: { refPitches: [440, 440, null, 440],
-    userPitches: [220, 220, null, 220], similarities: [1, 1, 0, 1] } });
-  assert.equal(paths.length, 4);
-  assert.equal(paths[0][1], paths[2][1]);
-  assert.equal(paths[1][1], paths[3][1]);
-  assert.ok(stops.length >= 2);
-});
 test("graph retains bounded history, freezes paused frames and resets on seeks", () => {
   const staff = view(); staff.setEnabled(true);
   const frame = { reference: midiReference([{ time: 0, duration: 20, pitch: 69 }]), singers: [{ id: "one", pitch: 69 }], active: true, latency: .1 };

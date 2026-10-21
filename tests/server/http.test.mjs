@@ -169,3 +169,16 @@ test("YouTube search uses yt-dlp and separation streams belong exclusively to th
   assert.equal((await fetch(url, { method: "HEAD" })).headers.get("content-length"), "12");
   assert.equal(await (await fetch(url)).text(), "instrumental");
 });
+
+test("key transposition obeys room control policy and romanization requires the screen owner", async t => {
+  const f = await fixture(t), guest = await f.join();
+  assert.equal((await f.command(guest, "transpose", { value: 3 })).status, 200);
+  assert.equal((await f.request(`/api/rooms/${f.tv.roomId}`, { token: guest.token })).data.transpose, 3);
+  for (const value of [13, -13, 1.5, "3", null]) assert.equal((await f.command(guest, "transpose", { value })).status, 400);
+  await f.command(f.tv, "policy", { guestCap: 5, roomCap: 100, guestControl: false });
+  assert.equal((await f.command(guest, "transpose", { value: 0 })).status, 403);
+  assert.equal((await f.request(`/api/rooms/${f.tv.roomId}/romanize`, { token: guest.token,
+    method: "POST", body: { text: "日本語" } })).status, 403);
+  assert.equal((await f.request(`/api/rooms/${f.tv.roomId}/romanize`, { token: f.tv.token,
+    method: "POST", body: { text: "a".repeat(1001) } })).status, 400);
+});

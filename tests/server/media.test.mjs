@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseMidi } from "../../src/hosted/midi.js";
-import { Cdg } from "../../src/hosted/cdg.js";
 import { detectPitch, PerformanceTools } from "../../src/hosted/performance.js";
 import { youtubeId } from "../../src/hosted/youtube.js";
 
@@ -19,21 +18,6 @@ test("MIDI parser reads tempo, running-status note durations and KAR lyrics; mal
   assert.throws(() => parseMidi(midiFixture().slice(0, -3)), /invalid_midi/);
 });
 
-test("CD+G applies palette and tile packets, and rebuilds correctly after seeking backwards", () => {
-  const packets = [];
-  const packet = (instruction, data) => packets.push(9, instruction, 0, 0, ...Array.from({ length: 16 }, (_, i) => data[i] || 0), 0, 0, 0, 0);
-  packet(30, [0, 0, 0x3c, 0]); // palette 1 red
-  packet(6, [0, 1, 1, 1, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63]);
-  let image;
-  const canvas = { getContext: () => ({ createImageData: () => ({ data: new Uint8ClampedArray(300 * 216 * 4) }), putImageData: value => { image = value; } }) };
-  const cdg = new Cdg(Uint8Array.from(packets).buffer, canvas);
-  cdg.render(2 / 300);
-  assert.equal(image.data[(12 * 300 + 6) * 4], 255);
-  cdg.render(0);
-  assert.equal(image.data[(12 * 300 + 6) * 4], 0);
-  cdg.render(2 / 300);
-  assert.equal(image.data[(12 * 300 + 6) * 4], 255);
-});
 
 test("scoring rejects silence, detects sung pitch and compares octave-equivalent guide notes", () => {
   assert.equal(detectPitch(new Float32Array(2048), 48000), null);

@@ -1,0 +1,57 @@
+# Adapt image, hostname/Ingress and resources to your cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encore-karaoke
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: encore-karaoke}
+  template:
+    metadata:
+      labels: {app: encore-karaoke}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: encore
+          image: ghcr.io/6ixfalls/encore-karaoke:latest-cpu
+          ports: [{name: http, containerPort: 3000}]
+          env:
+            - {name: PUBLIC_BASE_URL, value: "https://karaoke.example.com"}
+            - {name: SEPARATION_STORAGE_DIR, value: /var/cache/encore-media}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: media, mountPath: /var/cache/encore-media}
+            - {name: scratch, mountPath: /tmp}
+          resources:
+            requests: {cpu: "2", memory: 2Gi, ephemeral-storage: 2Gi}
+            limits: {cpu: "4", memory: 6Gi, ephemeral-storage: 8Gi}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 20
+      volumes:
+        # No medium: Memory: seekable media must use node disk, not pod RAM.
+        - name: media
+          emptyDir: {sizeLimit: 4Gi}
+        - name: scratch
+          emptyDir: {sizeLimit: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: encore-karaoke
+spec:
+  selector: {app: encore-karaoke}
+  ports: [{name: http, port: 3000, targetPort: http}]

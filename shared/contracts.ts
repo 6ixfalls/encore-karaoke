@@ -20,6 +20,7 @@ export const COMMANDS = new Set([
   "seek",
   "volume",
   "tempo",
+  "transpose",
   "lock",
   "end",
   "policy",

@@ -263,3 +263,13 @@ test("closing a growing media response releases its reader without cancelling pr
   assert.equal(jobs.get(job.id, "room", "display"), job);
   assert.equal(job.writer.destroyed, false);
 });
+
+test("a non-writable mounted media directory fails at startup with a storage diagnosis", async t => {
+  if (process.getuid?.() === 0) { t.skip("Root bypasses directory permission checks"); return; }
+  const { chmodSync } = await import("node:fs");
+  const directory = mkdtempSync(join(tmpdir(), "encore-permission-test-"));
+  t.after(() => { chmodSync(directory, 0o700); rmSync(directory, { recursive: true, force: true }); });
+  chmodSync(directory, 0o500);
+  assert.throws(() => new Separations(configuration({ SEPARATION_STORAGE_DIR: directory }),
+    { resolve: async () => source }), /separation_storage_unwritable/);
+});

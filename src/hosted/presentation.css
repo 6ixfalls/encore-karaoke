@@ -1,0 +1,59 @@
+/* Upstream components with hosted screen-size and accessibility adaptations. */
+@font-face { font-family: "Noto Sans JP"; src: url("../assets/fonts/NotoSansJP-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Noto Sans KR"; src: url("../assets/fonts/NotoSansKR-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Noto Sans SC"; src: url("../assets/fonts/NotoSansSC-Regular.ttf") format("truetype"); font-display: swap; }
+#tv-appliance .intro-card { visibility: hidden; z-index: 30; box-sizing: border-box; }
+#tv-appliance .intro-card.visible, #tv-appliance .intro-card.exiting { visibility: visible; }
+#tv-appliance .intro-card-title { font-size: clamp(1.8rem, 5vw, 5.5rem); overflow-wrap: anywhere; }
+#tv-appliance.showing-song-intro #lyrics-canvas { opacity: 0; }
+#tv-appliance .countdown-display { z-index: 35; }
+#tv-appliance .interlude-overlay { max-width: 90vw; box-sizing: border-box; z-index: 30; }
+#tv-appliance .interlude-text { font-size: clamp(1.5rem, 4vw, 4rem); }
+#tv-appliance .interlude-tip-box { font-size: clamp(1rem, 1.7vw, 1.4rem); }
+#song-results[hidden] { display: none; }
+#song-results.visible { opacity: 1; pointer-events: auto; }
+#song-results .score-title-text { text-align: center; font-size: clamp(1.3rem, 4vw, 3.5rem); }
+#song-results .score-display-number { font-size: clamp(6rem, 18vw, 16rem); }
+#song-results .rank-display-text { font-size: clamp(1.5rem, 5vw, 5rem); max-width: 90vw; text-align: center; }
+#song-results .score-session-leaderboard { transform: translateY(-50%); }
+#song-results .score-lb-row { display: flex; gap: 1rem; width: 100%; align-items: center; }
+#song-results .score-lb-name { flex: 1; overflow-wrap: anywhere; font-size: clamp(.8rem, 1.5vw, 1.4rem); }
+#song-results .score-skip-hint { color: white; background: #ffffff14; border-color: #ffffff30; }
+.celebration-confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.encore-settings details { margin: 1rem 0; border-top: 1px solid #89cff040; padding: 1rem 0; }
+.encore-settings summary { cursor: pointer; font: 700 1.5rem Rajdhani, sans-serif; color: #89cff0; }
+.encore-settings .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; padding: 1rem 0; }
+.encore-settings label { display: flex; flex-direction: column; gap: .5rem; }
+.encore-settings input[type=checkbox] { width: 22px; height: 22px; }
+.encore-settings output { font: 600 1rem Rajdhani, sans-serif; color: #ffd700; }
+.encore-settings .muted { grid-column: 1 / -1; }
+.startup-intro { position: fixed; inset: 0; z-index: 2000; background: #080810; display: grid; place-items: center; overflow: hidden; }
+.startup-warning { position: relative; text-align: center; max-width: 1000px; padding: 2rem; z-index: 3; font-family: Rajdhani, sans-serif; background: #080810; }
+.startup-warning h1 { font-size: clamp(1.5rem, 5vw, 4rem); color: #ff5555; letter-spacing: .1em; }
+.startup-warning p { font-size: clamp(1rem, 2.5vw, 1.8rem); opacity: .8; line-height: 1.5; }
+.startup-warning[hidden] { display: none; }
+.startup-title { position: absolute; font: 700 clamp(4rem, 18vw, 15rem) Rajdhani, "Noto Sans JP", sans-serif; display: flex; z-index: 2; opacity: 0; }
+.terebi-char { display: inline-block; }
+.startup-tiles { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(16, 1fr); grid-template-rows: repeat(9, 1fr); background: white; }
+.startup-tile { background: #080810; }
+.startup-skip { position: absolute; bottom: 2rem; right: 2rem; z-index: 4; }
+.startup-intro.animating .startup-title { animation: startupTitle 1.5s both; }
+.startup-intro.animating .terebi-char { animation: startupChar .7s cubic-bezier(.87,0,.13,1) calc(var(--char) * 80ms) both; }
+.startup-intro.animating .startup-tile { animation: startupTile .2s calc(1.5s + var(--delay)) both; }
+@keyframes startupChar { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes startupTitle { 0%, 70% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.75); } }
+@keyframes startupTile { from { opacity: 1; } to { opacity: 0; } }
+@media (max-width: 700px) {
+  #tv-appliance .intro-card-content { flex-wrap: wrap; gap: 1rem; }
+  #tv-appliance .intro-card-left { flex-basis: 100%; }
+  #tv-appliance .intro-card-badges { flex-direction: row; }
+  #tv-appliance .intro-badge { min-width: 0; padding: .35rem 1rem; font-size: 1rem; }
+  #tv-appliance .intro-card-right, #tv-appliance .intro-card-divider { display: none; }
+  #song-results.show-leaderboard .score-main-group, #song-results.show-leaderboard .score-title-text { transform: translateY(-15vh) scale(.7); }
+  #song-results .score-session-leaderboard { right: 5%; top: 65%; width: 90%; max-height: 30vh; overflow: auto; padding: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #tv-appliance *, #tv-appliance *::before, #tv-appliance *::after { animation-duration: .001ms !important; animation-delay: 0ms !important; transition-duration: .001ms !important; }
+  #tv-appliance .intro-card.visible, #tv-appliance .intro-card.visible * { opacity: 1; transform: none; }
+  #tv-appliance .intro-card.visible { transform: translateY(-50%); }
+}

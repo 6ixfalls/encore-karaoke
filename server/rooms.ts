@@ -65,6 +65,7 @@ export class Rooms {
       observed: "idle",
       volume: 0.65,
       tempo: 1,
+      transpose: 0,
       position: 0,
       members: {
         [session.id]: { nickname: session.nickname, role: session.role },
@@ -94,6 +95,7 @@ export class Rooms {
       observed: room.observed,
       volume: room.volume,
       tempo: room.tempo,
+      transpose: room.transpose,
       position: room.position,
       sampleTime: room.sampleTime,
       scores: room.scores || [],
@@ -298,7 +300,7 @@ export class Rooms {
     }
     requireValue(
       host ||
-        (room.policy.guestControl && ["play", "pause", "skip", "volume", "tempo", "seek"].includes(type)),
+        (room.policy.guestControl && ["play", "pause", "skip", "volume", "tempo", "transpose", "seek"].includes(type)),
       "forbidden",
       403,
     );
@@ -341,6 +343,10 @@ export class Rooms {
         break;
       case "tempo":
         room.tempo = number(p.value, 0.5, 1.5);
+        break;
+      case "transpose":
+        requireValue(Number.isInteger(p.value), "invalid_transpose");
+        room.transpose = number(p.value, -12, 12);
         break;
       case "lock":
         requireValue(typeof p.locked === "boolean");

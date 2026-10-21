@@ -1,4 +1,7 @@
 @import "../styles/variables.css";
+@import "../styles/animations.css";
+@import "../styles/scoring.css";
+@import "./presentation.css";
 @import "../styles/player.css";
 @import "../styles/menu.css";
 @import "../styles/modals.css";
@@ -21,11 +24,12 @@ body.tv #message { position: fixed; top: 16px; left: 20%; right: 20%; z-index: 1
 #tv-appliance .player-ui { z-index: 12; padding-bottom: 5vh; background: transparent; }
 #tv-appliance .player-ui::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to top, #000e, transparent 55%); opacity: 0; }
 #tv-appliance.has-lyrics .player-ui::before { opacity: 1; }
-#tv-appliance #lyrics-canvas { display: block; }
+#tv-appliance #lyrics-canvas { display: block; margin: 0 auto; }
 #tv-appliance #score { position: absolute; top: 98px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border: 1px solid #fff3; background: #000a; border-radius: 8px; font: 600 22px Rajdhani, sans-serif; color: #ffd700; margin: 0; }
 #tv-appliance #score:empty { display: none; }
 body.tv #lyrics, body.tv #next-lyrics { display: none; }
-#tv-settings-open { position: absolute; right: 1rem; bottom: 1rem; z-index: 25; background: #080810cc; }
+#tv-settings-open { position: absolute; right: 1rem; bottom: 1rem; z-index: 25; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border-radius: 50%; background: #080810cc; }
+#tv-settings-open img { display: block; filter: brightness(0) invert(1); }
 #tv-settings { width: min(900px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; color: white; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 #tv-settings::backdrop { background: #000b; }
 #tv-settings > h2 { margin-top: 0; }

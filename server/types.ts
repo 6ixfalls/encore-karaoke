@@ -45,6 +45,7 @@ export interface Room {
   observed: PlaybackState;
   volume: number;
   tempo: number;
+  transpose: number;
   position: number;
   sampleTime?: number;
   scores?: { playbackId: string; title: string; nickname: string; value: number; mode: "guide" | "stability" }[];

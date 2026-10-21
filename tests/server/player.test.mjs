@@ -138,6 +138,30 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+test("initialization retries a failed mixer even while the audio context is running", async t => {
+  const { player } = fixture(t);
+  let attempts = 0;
+  const retry = deferred();
+  player.createMixer = () => ({
+    initialize: () => {
+      attempts++;
+      if (attempts === 1) return Promise.reject(new Error("worklet fetch failed"));
+      return retry.promise;
+    },
+  });
+
+  await assert.rejects(player.initialize(), /worklet fetch failed/);
+  assert.equal(player.context.state, "running");
+  assert.equal(player.started, false);
+
+  const initializing = player.initialize();
+  assert.equal(attempts, 2);
+  assert.equal(player.started, false);
+  retry.resolve();
+  await initializing;
+  assert.equal(player.started, true);
+});
+
 test("fractional lyric transitions render between telemetry reports", async t => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const { player, service, room, reports, rendered } = fixture(t);
@@ -544,6 +568,7 @@ test("YouTube finalization retires progress polls before accepting the final ref
       tools.beginLiveReference();
       player.performanceTools = tools;
       player.loaded = "video";
+      player.audio.currentTime = 20;
       player.separation = { id: "job", roomId: "room-1" };
       const snapshot = (through, complete) => ({ pitches: Array(100).fill(440),
         step: 1024 / 44100, through, singable: 2, complete });
@@ -567,7 +592,7 @@ test("YouTube finalization retires progress polls before accepting the final ref
       assert.equal(tools.liveReference.complete, true);
       assert.equal(player.loaded, "video");
       assert.deepEqual(errors, []);
-      assert.deepEqual(reports.map(report => report.state), ["ended"]);
+      assert.deepEqual(reports.map(report => report.state), ["buffering", "ended"]);
       assert.equal(player.separationTimer, undefined);
     });
   }
@@ -863,4 +888,139 @@ test("ending media waits for the final streamed reference before submitting scor
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(reports.at(-1).state, "ended");
   assert.equal(requests, 2);
+});
+
+test("a growing buffer ending waits for finalized media and resumes instead of advancing the song", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { player, service, room, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: {
+    playbackId: "track", seek: { id: "previous-seek", position: 10 },
+  } };
+  await player.update(playing);
+  clearTimeout(player.separationTimer);
+  player.audio.currentTime = 20;
+  player.audio.paused = true;
+  player.audio.ended = true;
+  let mediaComplete = false, reloads = 0;
+  service.request = async () => ({ complete: true, mediaComplete, through: 90 });
+  player.audio.load = () => {
+    reloads++;
+    player.audio.currentTime = 0;
+    player.audio.ended = false;
+    player.audio.readyState = 0;
+  };
+  player.audio.dispatchEvent(new Event("ended"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reports.at(-1).state, "buffering");
+  assert.equal(reloads, 0);
+  assert.equal(player.resultsUntil, undefined);
+  mediaComplete = true;
+  t.mock.timers.tick(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reloads, 1);
+  assert.equal(reports.some(report => report.state === "ended"), false);
+  player.audio.readyState = 1;
+  player.audio.seekable = { length: 1, start: () => 0, end: () => 90 };
+  player.audio.seeking = true;
+  player.audio.dispatchEvent(new Event("loadedmetadata"));
+  assert.equal(player.audio.currentTime, 20);
+  assert.equal(player.audio.paused, true);
+  player.audio.seeking = false;
+  player.audio.dispatchEvent(new Event("seeked"));
+  assert.equal(player.audio.paused, false);
+  assert.equal(player.seekBuffering, false);
+  player.audio.currentTime = 90;
+  player.audio.paused = true;
+  player.audio.ended = true;
+  player.audio.dispatchEvent(new Event("ended"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reports.at(-1).state, "ended");
+  assert.equal(reloads, 1);
+});
+
+test("finalized media duration recognizes natural end before the vocal reference ends", async t => {
+  const { player, service, room, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  await player.update({ ...room, desired: "playing", current: { playbackId: "track" } });
+  clearTimeout(player.separationTimer);
+  service.request = async () => ({ complete: true, mediaComplete: true, through: 90 });
+  let reloads = 0;
+  player.audio.load = () => {
+    reloads++;
+    player.audio.currentTime = 0;
+    player.audio.ended = false;
+    player.audio.duration = 89;
+  };
+  // The growing response's temporary duration must not be treated as final.
+  player.audio.currentTime = 20;
+  player.audio.duration = 20;
+  player.audio.paused = true;
+  player.audio.ended = true;
+  player.audio.dispatchEvent(new Event("ended"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reloads, 1);
+  assert.equal(player.audio.currentTime, 20);
+  assert.equal(reports.some(report => report.state === "ended"), false);
+
+  player.audio.currentTime = 89;
+  player.audio.paused = true;
+  player.audio.ended = true;
+  player.audio.dispatchEvent(new Event("ended"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reloads, 1);
+  assert.equal(player.separation.finalized, true);
+  assert.equal(reports.at(-1).state, "ended");
+  assert.equal(reports.at(-1).position, 89);
+});
+
+test("late progress replies cannot overwrite the completed file used for buffer recovery", async t => {
+  const { player, service, room, errors } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  clearTimeout(player.separationTimer);
+  player.audio.currentTime = 20;
+  const pending = deferred();
+  service.request = () => pending.promise;
+  const polling = player.pollSeparation(player.loadingVersion, "track");
+  service.request = async () => ({ complete: true, mediaComplete: true, through: 90 });
+  player.report("ended");
+  await new Promise(resolve => setImmediate(resolve));
+  pending.resolve({ complete: false, mediaComplete: false, through: 30 });
+  await polling;
+  assert.equal(player.referenceSnapshot.mediaComplete, true);
+  assert.equal(player.referenceSnapshot.through, 90);
+  assert.equal(player.audio.currentTime, 20);
+  assert.deepEqual(errors, []);
+});
+
+test("buffer-edge recovery honors a newer paused seek while media finishes", async t => {
+  const { player, service, room, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const playing = { ...room, desired: "playing", current: { playbackId: "track" } };
+  await player.update(playing);
+  clearTimeout(player.separationTimer);
+  player.audio.currentTime = 20;
+  player.audio.paused = true;
+  player.audio.ended = true;
+  const pending = deferred();
+  service.request = () => pending.promise;
+  player.audio.dispatchEvent(new Event("ended"));
+  const paused = { ...playing, desired: "paused", current: {
+    playbackId: "track", seek: { id: "new-seek", position: 60 },
+  } };
+  await player.update(paused);
+  assert.equal(player.audio.currentTime, 20);
+  pending.resolve({ complete: true, mediaComplete: true, through: 90 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(player.audio.currentTime, 60);
+  assert.equal(player.audio.paused, true);
+  assert.equal(reports.some(report => report.state === "ended"), false);
+  await player.update(paused);
+  assert.equal(player.audio.currentTime, 60);
 });

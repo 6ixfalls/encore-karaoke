@@ -2,6 +2,34 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { guideNotes, pageLayout, HostedPianoRoll } from '../../src/hosted/scoring/piano-roll.js';
 import { midiReference } from '../../src/hosted/scoring/reference.js';
+import { PerformanceTools } from '../../src/hosted/performance.js';
+
+test('streamed display references retain completed hit and miss colors as new notes arrive', () => {
+  const ctx = new Proxy({ createLinearGradient: () => ({ addColorStop() {} }) },
+    { get: (target, name) => target[name] || (() => {}) });
+  const roll = new HostedPianoRoll({ clientWidth: 1200 }, { getContext: () => ctx });
+  const tools = new PerformanceTools({ status() {}, score() {}, staff: { reset: () => roll.reset() } });
+  const step = 1024 / 44100;
+  const snapshot = { pitches: [440, null, 440, null], step, through: 4 * step, singable: 2 * step, complete: false };
+  tools.beginLiveReference();
+  tools.updateLiveReference(snapshot);
+  const render = (time, pitch) => roll.render({ time, reference: tools.displayReference,
+    singers: [{ id: 'singer', pitch }], active: true });
+  render(step / 2, 69);
+  render(2.5 * step, 60);
+  assert.deepEqual(roll.notes.map(note => note.hitStatus), ['hit', 'miss']);
+
+  tools.updateLiveReference({ ...snapshot, pitches: [...snapshot.pitches, 493.88],
+    through: 5 * step, singable: 3 * step, complete: true });
+  render(4.5 * step, null);
+  assert.deepEqual(roll.notes.map(note => note.hitStatus), ['hit', 'miss', undefined]);
+  assert.equal(roll.notes[2].pitch, 71);
+
+  tools.setTranspose(2);
+  render(4.5 * step, null);
+  assert.deepEqual(roll.notes.map(note => note.pitch), [71, 71, 73]);
+  assert.ok(roll.notes.every(note => note.hitStatus === undefined));
+});
 
 test('vocal guide bars preserve silence and sustained notes across streamed snapshots', () => {
   assert.deepEqual(guideNotes({ pitches: [440, 440, null, 440, 493.88], step: .1 }), [

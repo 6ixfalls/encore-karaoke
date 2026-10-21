@@ -7,7 +7,10 @@ export function mountTV() {
   const shell = document.createElement("div");
   shell.id = "tv-appliance";
   shell.className = "mode-menu";
-  shell.innerHTML = `<video class="tv-background" src="/assets/standby.mp4" autoplay muted loop playsinline aria-hidden="true"></video><div class="overlay-ui"><div class="standby-screen"><div class="standby-text">SELECT SONG</div></div><div class="idle-hint">SCAN TO CONNECT YOUR PHONE</div></div><div class="top-bar-container"><div class="info-bar persist-visible"><span class="info-bar-label">UP NEXT</span><span class="info-bar-content" id="tv-next">Choose your first song</span></div><div class="system-indicators">ENCORE</div></div><div class="tv-song-info"></div><div class="player-ui"></div><div class="qr-code-container"><div class="qr-counter-badge"><span id="tv-remote-count">0</span> remotes</div><div class="qr-image-wrapper"></div><p id="tv-pairing">Scan to control &amp; sing</p></div>`;
+  shell.innerHTML = `<video class="tv-background" src="/assets/standby.mp4" autoplay muted loop playsinline aria-hidden="true"></video><div class="overlay-ui"><div class="standby-screen"><div class="standby-text">SELECT SONG</div></div><div class="idle-hint">SCAN TO CONNECT YOUR PHONE</div></div><div class="top-bar-container"><div class="info-bar persist-visible"><span class="info-bar-label">UP NEXT</span><span class="info-bar-content" id="tv-next">Choose your first song</span></div><div class="system-indicators">ENCORE</div></div><div class="tv-song-info"></div><div class="player-ui"></div><div class="qr-code-container"><div class="qr-counter-badge"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg><span id="tv-remote-count">0</span></div><div class="qr-image-wrapper"></div><p id="tv-pairing">Scan to control &amp; sing</p></div>`;
+  const counterBadge = shell.querySelector(".qr-counter-badge");
+  counterBadge.setAttribute("role", "img");
+  counterBadge.setAttribute("aria-label", "0 connected devices");
   $("room").append(shell);
   const stage = document.querySelector(".stage");
   shell.prepend(stage);
@@ -23,7 +26,10 @@ export function mountTV() {
   $("progress").hidden = true;
   const settingsButton = document.createElement("button");
   settingsButton.id = "tv-settings-open";
-  settingsButton.textContent = "Microphone & recording";
+  settingsButton.type = "button";
+  settingsButton.innerHTML = '<img src="/assets/icons/settings.svg" alt="" width="24" height="24">';
+  settingsButton.setAttribute("aria-label", "Settings · lyrics, audio & recording");
+  settingsButton.title = "Settings · lyrics, audio & recording";
   settingsButton.setAttribute("aria-haspopup", "dialog");
   settingsButton.setAttribute("aria-controls", "tv-settings");
   const settings = document.createElement("dialog");
@@ -58,6 +64,9 @@ export function mountTV() {
     $("tv-next").textContent = room.queue.map((song) => `${song.title} · ${song.artist || song.nickname}`).join(" / ") || "Choose your first song";
     const remotes = room.participants.filter((p) => p.role === "guest").length;
     $("tv-remote-count").textContent = remotes;
+    const devicesLabel = `${remotes} connected ${remotes === 1 ? "device" : "devices"}`;
+    counterBadge.setAttribute("aria-label", devicesLabel);
+    counterBadge.title = devicesLabel;
     shell.querySelector(".qr-code-container").classList.toggle("has-remotes", remotes > 0);
     $("host-tools").hidden = true;
 

@@ -1,8 +1,8 @@
 import { lyricFrame } from "./lyrics-timing.js";
 
 export class BrowserPlayer {
-  constructor(services, { telemetry, lyrics, error, released, media, performance: performanceTools }) {
-    Object.assign(this, { services, telemetry, lyrics, error, released });
+  constructor(services, { telemetry, lyrics, error, released, media, performance: performanceTools, createMixer, trackReady, finished }) {
+    Object.assign(this, { services, telemetry, lyrics, error, released, createMixer, trackReady, finished });
     this.generation = null;
     this.revalidated = false;
     this.retired = new Set();
@@ -12,6 +12,7 @@ export class BrowserPlayer {
     this.localMedia = this.audio;
     this.performanceTools = performanceTools;
     this.audio.preload = "auto";
+    this.audio.preservesPitch = true;
     this.loadingVersion = 0;
     this.bindMedia(this.audio);
     this.lyricsTimer = setInterval(() => this.renderLyrics(), 50);
@@ -24,7 +25,7 @@ export class BrowserPlayer {
   bindMedia(media) {
     media.addEventListener("seeked", () => {
       if (this.audio !== media || !this.seekApplying || !this.valid()) return;
-      const seek = this.room?.current?.seek;
+      const seek = this.playbackSeek();
       if (seek?.id === this.seekApplying) {
         if (Math.abs(media.currentTime - seek.position) <= 0.25) {
           this.seekId = seek.id;
@@ -65,6 +66,7 @@ export class BrowserPlayer {
     }
   }
   clearMedia() {
+    clearTimeout(this.introTimer);
     this.referenceSnapshot = null;
     this.guideBuffering = false;
     this.seekId = null;
@@ -74,6 +76,7 @@ export class BrowserPlayer {
     this.seekReloaded = false;
     this.seekApplying = null;
     this.seekRejected = false;
+    this.recoverySeek = null;
     const separation = this.separation;
     this.separation = null;
     clearTimeout(this.separationTimer);
@@ -88,10 +91,14 @@ export class BrowserPlayer {
     if (this.localMedia.hidden !== undefined) this.localMedia.hidden = true;
     this.performanceTools?.trackChanged();
   }
+  playbackSeek() {
+    const seek = this.room?.current?.seek;
+    return this.recoverySeek && seek?.id === this.recoverySeek.commandId ? this.recoverySeek : seek;
+  }
   async initialize() {
-    if (this.context?.state === "running") return;
     if (this.context) {
-      await this.context.resume();
+      if (this.context.state !== "running") await this.context.resume();
+      await this.mixer?.initialize();
       this.started = true;
       return;
     }
@@ -100,13 +107,15 @@ export class BrowserPlayer {
     this.gate.gain.value = 0;
     // The media element has exactly one route to the speakers: this initially closed output gate.
     this.source = this.context.createMediaElementSource(this.audio);
-    this.source.connect(this.gate);
+    if (this.createMixer) this.mixer = this.createMixer(this.context, this.source, this.gate);
+    else this.source.connect(this.gate);
     this.gate.connect(this.context.destination);
     this.context.addEventListener("statechange", () => {
       if (this.context.state !== "running" && this.generation)
         this.stop(`audio_context_${this.context.state}`).catch((error) => this.error(error));
     });
     await this.context.resume();
+    await this.mixer?.initialize();
     this.started = true;
   }
   valid() {
@@ -134,8 +143,9 @@ export class BrowserPlayer {
     this.expires = performance.now() + budget;
     const now = this.context.currentTime;
     this.gate.gain.cancelScheduledValues(now);
-    this.gate.gain.setValueAtTime(this.room?.volume ?? 0.65, now);
+    this.gate.gain.setValueAtTime(this.mixer ? 1 : this.room?.volume ?? 0.65, now);
     this.gate.gain.setValueAtTime(0, now + budget / 1000);
+    this.mixer?.setLease(budget / 1000);
     // Retire media and microphone capture when the display lease expires.
     clearTimeout(this.expiryTimer);
     this.expiryTimer = setTimeout(
@@ -219,13 +229,40 @@ export class BrowserPlayer {
       const job = this.separation;
       if (!job.finishing) {
         job.finishing = true;
+        // Retire any progress request opened before this end event.
+        this.loadingVersion++;
+        const endPosition = this.audio.currentTime;
+        this.mediaState = "buffering";
+        this.report("buffering", playbackId);
         clearTimeout(this.separationTimer);
         const finish = () => this.services.request(`/api/rooms/${job.roomId}/separation/${job.id}`).then(snapshot => {
           if (this.separation !== job || this.loaded !== playbackId || !this.valid()) return;
+          this.referenceSnapshot = snapshot;
           this.performanceTools?.updateLiveReference?.(snapshot);
-          if (snapshot.complete === false) {
+          if (snapshot.complete === false || snapshot.mediaComplete === false) {
             this.separationTimer = setTimeout(finish, 1000);
             return;
+          }
+          const seek = this.playbackSeek();
+          // A growing response may expose a temporary duration. Only trust the
+          // media duration after reopening the finalized file; -shortest can
+          // make that file shorter than the decoded vocal reference.
+          const duration = this.seekReloaded && Number.isFinite(this.audio.duration) && this.audio.duration > 0
+            ? this.audio.duration : snapshot.through;
+          if (duration > endPosition + .25 || seek && seek.id !== this.seekId) {
+            // A growing MP4 can emit ended at its current buffer edge. Reopen
+            // the completed file and seek back before allowing normal playback.
+            job.finishing = false;
+            this.recoverySeek = { id: `recovery:${this.loadingVersion}:${endPosition}`,
+              commandId: this.room?.current?.seek?.id,
+              position: seek && seek.id !== this.seekId ? seek.position : endPosition };
+            this.seekApplying = null;
+            this.seekRejected = false;
+            this.seekBuffering = true;
+            this.seekReloaded = true;
+            this.playAttempt = null;
+            this.audio.load();
+            return this.update(this.room);
           }
           job.finalized = true;
           this.report(state, playbackId);
@@ -239,6 +276,7 @@ export class BrowserPlayer {
     if (state === "ended" && this.endedPlaybackId !== playbackId) {
       this.endedPlaybackId = playbackId;
       this.resultsUntil = performance.now() + 5000;
+      this.finished?.(this.room.current, this.performanceTools?.result());
     }
     this.telemetry({
       leaseGeneration: this.generation,
@@ -274,8 +312,13 @@ export class BrowserPlayer {
       return;
     }
     // Do not cancel the audio-thread cutoff when changing volume.
-    this.gate.gain.setValueAtTime(room.volume, this.context.currentTime);
+    this.gate.gain.setValueAtTime(this.mixer ? 1 : room.volume, this.context.currentTime);
+    if (this.mixer) {
+      this.mixer.music.gain.setValueAtTime(room.volume, this.context.currentTime);
+      this.mixer.setTranspose(room.transpose || 0);
+    }
     this.audio.playbackRate = room.tempo;
+    this.performanceTools?.setTranspose?.(room.transpose || 0);
     if (!room.current) {
       this.loadingVersion++;
       this.loaded = null;
@@ -294,6 +337,7 @@ export class BrowserPlayer {
         this.resultsTimer = setTimeout(() => this.update(this.room).catch(this.error), this.resultsUntil - performance.now());
         return;
       }
+      clearTimeout(this.resultsTimer);
       const version = ++this.loadingVersion;
       this.loading = true;
       this.mediaState = "loading";
@@ -323,6 +367,7 @@ export class BrowserPlayer {
         this.loading = false;
         this.mediaState = "ready";
         this.failedPlaybackId = null;
+        this.introUntil = performance.now() + (this.trackReady?.(room.current) || 0);
       } catch (error) {
         if (version === this.loadingVersion) {
           this.failPlayback(error, playbackId);
@@ -332,13 +377,18 @@ export class BrowserPlayer {
     }
     if (
       this.loading ||
+      this.separation?.finishing ||
       !this.valid() ||
       this.loaded !== this.room?.current?.playbackId
     )
       return;
-    const current = this.room.current;
+    if (this.introUntil > performance.now()) {
+      clearTimeout(this.introTimer);
+      this.introTimer = setTimeout(() => this.update(this.room).catch(this.error), this.introUntil - performance.now());
+      return;
+    }
     this.audio.playbackRate = this.room.tempo;
-    const seek = current.seek;
+    const seek = this.playbackSeek();
     if (seek && this.seekId !== seek.id) {
       if (this.seekCommandId !== seek.id) {
         this.seekCommandId = seek.id;
@@ -450,6 +500,7 @@ export class BrowserPlayer {
         this.loading = false;
         this.mediaState = "ready";
         this.failedPlaybackId = null;
+        this.introUntil = performance.now() + (this.trackReady?.(this.room.current) || 0);
         await this.update(this.room);
       }
       if (!this.loading && (this.guideBuffering || this.seekBuffering)) await this.update(this.room);
@@ -482,6 +533,7 @@ export class BrowserPlayer {
   }
   disconnected() {
     this.connected = false;
+    this.mixer?.silence();
     this.revalidated = false;
     if (this.loading) {
       this.loadingVersion++;
@@ -501,6 +553,7 @@ export class BrowserPlayer {
     if (this.generation) console.info("Karaoke display stopped", { reason });
     const generation = this.generation;
     this.generation = null;
+    this.mixer?.silence();
     this.revalidated = false;
     if (generation) this.retired.add(generation);
     this.loadingVersion++;
