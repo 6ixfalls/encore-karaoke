@@ -521,6 +521,24 @@ export class Rooms {
         requireValue(message.score && ["guide", "stability"].includes(message.score.mode));
         number(message.score.value, 0, 100);
         number(message.score.samples, 20, 1_000_000);
+        if (message.score.inputs !== undefined) {
+          requireValue(message.score.aggregation === "mean" && Array.isArray(message.score.inputs) &&
+            message.score.inputs.length > 0 && message.score.inputs.length <= 200);
+          const ids = new Set<string>();
+          for (const input of message.score.inputs) {
+            requireValue(input && ["display", "phone"].includes(input.source) && ["guide", "stability"].includes(input.mode));
+            text(input.id, 128); text(input.label, 100);
+            requireValue(!ids.has(input.id)); ids.add(input.id);
+            number(input.samples, 0, 1_000_000);
+            if (input.value === null) text(input.reason, 200);
+            else { number(input.value, 0, 100); number(input.samples, 20, 1_000_000); }
+            if (input.reason !== undefined) text(input.reason, 200);
+          }
+          const scored = message.score.inputs.filter(input => input.value !== null);
+          requireValue(scored.length > 0);
+          const mean = Math.round(10 * scored.reduce((sum, input) => sum + input.value!, 0) / scored.length) / 10;
+          requireValue(Math.abs(mean - message.score.value) < .001);
+        }
       }
       room.position = number(message.position, 0, 86_400);
       room.sampleTime = this.clock();
@@ -540,6 +558,10 @@ export class Rooms {
         if (message.score) room.scores = [...(room.scores || []), {
           playbackId: room.current.playbackId, title: room.current.title,
           nickname: room.current.nickname, value: message.score.value, mode: message.score.mode,
+          ...(message.score.inputs ? { inputs: message.score.inputs.map(input => ({
+            id: input.id, label: input.label, source: input.source, value: input.value,
+            samples: input.samples, mode: input.mode, ...(input.reason ? { reason: input.reason } : {}),
+          })), aggregation: "mean" as const } : {}),
         }].slice(-20);
         this.next(room);
       }

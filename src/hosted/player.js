@@ -318,10 +318,12 @@ export class BrowserPlayer {
       }
       return;
     }
+    const score = state === "ended" ? this.performanceTools?.result() : undefined;
     if (state === "ended" && this.endedPlaybackId !== playbackId) {
       this.endedPlaybackId = playbackId;
       this.resultsUntil = performance.now() + 5000;
-      this.finished?.(this.room.current, this.performanceTools?.result());
+      this.finished?.(this.room.current, score, score ? undefined : this.performanceTools?.unavailableReason?.(),
+        score?.inputs || this.performanceTools?.inputResults?.() || []);
     }
     this.telemetry({
       leaseGeneration: this.generation,
@@ -331,7 +333,7 @@ export class BrowserPlayer {
         ? this.audio.currentTime
         : 0,
       rate: this.audio.playbackRate,
-      ...(state === "ended" && this.performanceTools?.result() ? { score: this.performanceTools.result() } : {}),
+      ...(score ? { score } : {}),
     });
   }
   async update(room) {

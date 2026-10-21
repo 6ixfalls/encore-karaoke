@@ -7,6 +7,26 @@ import { Romanizer } from "../../src/hosted/romanizer.ts";
 import { PerformanceTools } from "../../src/hosted/performance.js";
 
 const cues = [{ time: 10, end: 15, text: "One" }, { time: 30, end: 35, text: "Two" }];
+test("song results show missing-score guidance and animate a measured zero score", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const element = () => ({ hidden: true, textContent: "", style: {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    preferences: { celebrations: true }, player: { valid: () => true },
+    results: element(), scoreTitle: element(), scoreNumber: element(), scoreStatus: element(),
+    rank: element(), leaderboard: element(), inputResults: element(), skip() {}, hideStage() {},
+  });
+  const song = { playbackId: "song", title: "Song", nickname: "Singer" };
+  presentation.finish(song, undefined, "Connect a phone microphone.");
+  assert.equal(presentation.results.hidden, false);
+  assert.equal(presentation.scoreTitle.textContent, "SINGER'S SCORE");
+  assert.equal(presentation.scoreNumber.textContent, "—");
+  assert.equal(presentation.rank.textContent, "SCORE UNAVAILABLE");
+  assert.equal(presentation.scoreStatus.textContent, "Connect a phone microphone.");
+  presentation.finish(song, { value: 0, samples: 100, mode: "guide" });
+  assert.equal(presentation.scoreNumber.textContent, "0");
+  assert.equal(presentation.scoreStatus.hidden, true);
+  assert.equal(presentation.rank.textContent, "");
+});
 test("vocal countdowns and interludes follow cue gaps and rewind without timers", () => {
   assert.deepEqual(gapPresentation([], 0), { countdown: null, interlude: false });
   assert.equal(gapPresentation(cues, 7).countdown, 3);

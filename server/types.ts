@@ -1,4 +1,5 @@
 /** Ephemeral room records. Incoming payloads still require runtime validation. */
+import type { InputScoreResult, PerformanceScore } from "../shared/scoring.js";
 export type Role = "host" | "guest";
 export interface Session {
   id: string;
@@ -48,7 +49,7 @@ export interface Room {
   transpose: number;
   position: number;
   sampleTime?: number;
-  scores?: { playbackId: string; title: string; nickname: string; value: number; mode: "guide" | "stability" }[];
+  scores?: { playbackId: string; title: string; nickname: string; value: number; mode: "guide" | "stability"; inputs?: InputScoreResult[]; aggregation?: "mean" }[];
   members: Record<string, { nickname: string; role: Role }>;
   policy: { roomCap: number; guestCap: number; guestControl: boolean };
   lease: Lease | null;
@@ -87,7 +88,7 @@ export interface Telemetry {
   playbackId: string;
   state: PlaybackState;
   position: number;
-  score?: { value: number; samples: number; mode: "guide" | "stability" };
+  score?: PerformanceScore;
 }
 export interface Tables {
   sessions: Session;

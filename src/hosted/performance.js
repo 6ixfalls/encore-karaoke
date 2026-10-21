@@ -2,7 +2,8 @@ import { requestMicrophone } from "./microphone.js";
 // SPDX-License-Identifier: GPL-3.0-only
 import { createMicPitchDetector, detectPitchFromSamplesMic } from "./scoring/detect.js";
 import { freqToSemitone } from "./scoring/state.js";
-import { midiReference, vocalReference, ReferenceScore } from "./scoring/reference.js";
+import { midiReference, vocalReference } from "./scoring/reference.js";
+import { InputScore, inputColor } from "./scoring/input-score.js";
 import { DEFAULT_MIC_LATENCY_COMPENSATION_SEC } from "./scoring/constants.js";
 
 const defaultMicDetector = createMicPitchDetector();
@@ -11,8 +12,9 @@ export function detectPitch(samples, sampleRate) {
   return hz === null ? null : freqToSemitone(hz);
 }
 export class PerformanceTools {
-  constructor({ status, score, recording, staff }) {
-    Object.assign(this, { status, score, recording, staff });
+  constructor({ status, score, recording, staff, inputs = () => {} }) {
+    Object.assign(this, { status, score, recording, staff, inputs });
+    this.phoneLabels = new Map();
     this.remoteInputs = new Map();
     this.references = new Map();
     this.latency = DEFAULT_MIC_LATENCY_COMPENSATION_SEC;
@@ -20,9 +22,9 @@ export class PerformanceTools {
     this.resetScore();
   }
   resetScore() {
-    this.samples = 0; this.credit = 0; this.mode = "stability"; this.previousPitch = null;
-    this.referenceScore = null; this.reference = null; this.guideNotes = null;
-    this.liveReference = null; this.pendingScores = [];
+    this.inputScores = new Map(); this.lastScoringTime = 0;
+    this.mode = "stability"; this.reference = null; this.guideNotes = null;
+    this.liveReference = null;
     this.displayReference = null;
     this.staff?.reset();
   }
@@ -56,9 +58,10 @@ export class PerformanceTools {
       }
     }
     if (current() && this.reference?.duration > 0) {
-      this.referenceScore = new ReferenceScore(this.reference);
-      this.referenceScore.anchor(player.audio?.currentTime || 0);
       this.mode = "guide";
+      this.lastScoringTime = player.audio?.currentTime || 0;
+      this.inputScores.clear();
+      this.updateDisplayReference();
     }
   }
   beginLiveReference() {
@@ -68,8 +71,7 @@ export class PerformanceTools {
       return pitch == null ? [] : [pitch];
     };
     this.reference = this.liveReference = reference;
-    this.referenceScore = new ReferenceScore(reference);
-    this.referenceScore.anchor(0);
+    this.inputScores.clear(); this.lastScoringTime = 0;
     this.mode = "guide";
     this.status("Separating streamed audio. Playback starts after the first processed chunk.");
   }
@@ -85,8 +87,7 @@ export class PerformanceTools {
     Object.assign(reference, { pitches: snapshot.pitches, end: snapshot.pitches.length * snapshot.step,
       duration: snapshot.singable, through: snapshot.through, complete: snapshot.complete });
     this.updateDisplayReference();
-    this.referenceScore.scorer.totalSingable = Math.max(0.5, reference.duration);
-    this.flushLiveScores();
+    for (const score of this.inputScores.values()) score.flush(reference);
     this.status(snapshot.complete ? "Vocal separation complete. Reference scoring is ready." :
       `Separating ahead of playback: ${Math.floor(snapshot.through)} seconds ready. Score is provisional.`);
   }
@@ -104,17 +105,13 @@ export class PerformanceTools {
       pitches: reference.pitches?.map(hz => hz === null ? null : hz * factor),
       at: time => reference.at(time).map(hz => hz * factor) });
   }
-  flushLiveScores() {
-    while (this.pendingScores.length && this.pendingScores[0].time <= this.liveReference.through) {
-      const sample = this.pendingScores.shift();
-      this.referenceScore.update(sample.time, sample.hz, this.latency, sample.rate);
-    }
-  }
-  attachRemoteMicrophone(id, source, context) {
+  attachRemoteMicrophone(id, source, context, nickname) {
     this.detachRemoteMicrophone(id);
+    if (!this.phoneLabels.has(id)) this.phoneLabels.set(id, `Phone ${this.phoneLabels.size + 1}${nickname ? ` · ${nickname}` : ""}`.slice(0, 100));
     const analyser = context.createAnalyser(); analyser.fftSize = 2048;
     source.connect(analyser);
-    this.remoteInputs.set(id, { source, analyser, context, detector: createMicPitchDetector(), buffer: new Float32Array(2048) });
+    this.remoteInputs.set(id, { source, analyser, context, label: this.phoneLabels.get(id),
+      detector: createMicPitchDetector(), buffer: new Float32Array(2048) });
   }
   detachRemoteMicrophone(id) {
     const input = this.remoteInputs.get(id);
@@ -124,20 +121,20 @@ export class PerformanceTools {
   }
   readMicrophones(active) {
     const singers = [];
-    let scoringHz = null;
     const inputs = [...(this.analyser ? [["local", this]] : []), ...this.remoteInputs];
     for (const [id, input] of inputs) {
-      let hz = null;
+      let hz = null, rms = 0;
       if (active) {
         input.analyser.getFloatTimeDomainData(input.buffer);
+        rms = Math.sqrt(input.buffer.reduce((sum, sample) => sum + sample * sample, 0) / input.buffer.length);
         hz = detectPitchFromSamplesMic(input.detector, input.buffer, input.context.sampleRate);
       }
-      // Prefer the local microphone, then the first phone with a detected voice.
-      // Read each input once so scoring also works when the pitch graph is off.
-      if (scoringHz === null && hz !== null) scoringHz = hz;
-      singers.push({ id, pitch: hz === null ? null : freqToSemitone(hz) });
+      // The same sample feeds this microphone's score, trace and receipt indicator.
+      singers.push({ id, label: id === "local" ? "Display microphone" : input.label,
+        source: id === "local" ? "display" : "phone", color: inputColor(id), rms, hz,
+        pitch: hz === null ? null : freqToSemitone(hz) });
     }
-    return { hz: scoringHz, singers };
+    return singers;
   }
   async startMicrophone(player) {
     if (!player.valid()) throw new Error("start_display_first");
@@ -175,41 +172,41 @@ export class PerformanceTools {
     this.stream = null; this.input = null; this.analyser = null;
   }
   trackChanged() { this.stopRecording(); this.resetScore(); this.score(""); }
-  result() {
-    if (this.liveReference && (!this.liveReference.complete || this.liveReference.failed || this.pendingScores.length)) return undefined;
-    if (this.referenceScore) return this.referenceScore.samples >= 20 ? this.referenceScore.result() : undefined;
-    return this.samples >= 20 ? { value: Math.round(100 * this.credit / this.samples), samples: this.samples, mode: this.mode } : undefined;
+  inputResults(provisional = false) {
+    return [...this.inputScores.values()].map(score => score.result(this.liveReference, provisional));
+  }
+  result(provisional = false) {
+    const inputs = this.inputResults(provisional), scored = inputs.filter(input => input.value !== null);
+    if (!scored.length) return undefined;
+    return { value: Math.round(10 * scored.reduce((sum, input) => sum + input.value, 0) / scored.length) / 10,
+      samples: Math.max(...scored.map(input => input.samples)), mode: this.mode, inputs, aggregation: "mean" };
+  }
+  unavailableReason() {
+    if (this.inputScores.size) return this.inputResults().find(input => input.reason)?.reason;
+    return "Enable the display microphone or connect a phone microphone before singing to receive a score.";
   }
   update(player) {
     this.drawFrame?.();
     const time = player.audio.currentTime;
     const active = !!(player.valid() && !player.audio.paused && !player.loading && player.loaded);
-    const { hz, singers } = this.readMicrophones(active);
-    if (this.staff?.enabled) this.staff.render({ time, reference: this.displayReference || this.reference, singers, active, latency: this.latency });
-    if ((!this.analyser && !this.remoteInputs.size) || !active) {
-      if (!this.liveReference || !this.pendingScores.length) this.referenceScore?.anchor(time);
-      this.previousPitch = null;
-      return;
-    }
-    const pitch = hz === null ? null : freqToSemitone(hz);
-    if (this.liveReference) {
-      if (this.pendingScores.length >= 400) {
-        this.liveReference.failed = true;
-        this.pendingScores = [];
-        this.status("Live reference delayed. A final melody score will not be published.");
-        return;
+    const singers = this.readMicrophones(active), connected = new Set(singers.map(singer => singer.id));
+    for (const singer of singers) {
+      let score = this.inputScores.get(singer.id);
+      if (!score) {
+        score = new InputScore(singer, this.reference, this.lastScoringTime);
+        this.inputScores.set(singer.id, score);
       }
-      this.pendingScores.push({ time, hz: hz === null ? null : hz / 2 ** ((this.transpose || 0) / 12), rate: player.audio.playbackRate });
-      this.flushLiveScores();
-    } else if (this.referenceScore) {
-      this.referenceScore.update(time, hz === null ? null : hz / 2 ** ((this.transpose || 0) / 12), this.latency, player.audio.playbackRate);
-    } else {
-      const credit = pitch === null || this.previousPitch === null ? null : Math.max(0, 1 - Math.abs(pitch - this.previousPitch) / 2);
-      if (credit !== null) { this.credit += credit; this.samples++; }
+      if (active) score.update(time, singer.hz === null ? null : singer.hz / 2 ** ((this.transpose || 0) / 12),
+        this.latency, player.audio.playbackRate, this.liveReference);
     }
-    this.previousPitch = pitch;
-    const note = pitch === null ? "—" : ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "B♭", "B"][((Math.round(pitch) % 12) + 12) % 12];
-    this.score(`${this.referenceScore ? "Nightingale pitch match" : "Pitch stability"}: ${(this.liveReference ? this.referenceScore.result() : this.result())?.value ?? "…"}${this.liveReference && !this.liveReference.complete ? " (provisional)" : ""} · ${note}`);
+    for (const [id, score] of this.inputScores) if (!active || !connected.has(id)) score.anchor(time);
+    this.lastScoringTime = time;
+    if (this.staff?.enabled) this.staff.render({ time, reference: this.displayReference || this.reference, singers, active, latency: this.latency });
+    const results = this.inputResults(true);
+    this.inputs(singers.map(singer => ({ ...singer, active, result: results.find(result => result.id === singer.id),
+      provisional: !!(this.liveReference && !this.liveReference.complete) })));
+    const group = this.result(true);
+    this.score(group ? `${this.mode === "guide" ? "Nightingale pitch match" : "Pitch stability"} · Group: ${group.value} / 100${this.liveReference && !this.liveReference.complete ? " (provisional)" : ""}` : "");
   }
 
   startRecording(player) {

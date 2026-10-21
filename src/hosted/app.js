@@ -12,6 +12,7 @@ import { AudioMixer } from "./audio-mixer.js";
 import { loadPreferences } from "./preferences.js";
 import { mountSettings } from "./settings.js";
 import { Romanizer } from "./romanizer.js";
+import { mountInputStatus } from "./input-status.js";
 
 const $ = (id) => document.getElementById(id);
 const services = new BrowserServices();
@@ -90,6 +91,7 @@ function setLiveScoring(enabled) {
 setLiveScoring(tv);
 const performanceTools = new PerformanceTools({
   staff,
+  inputs: mountInputStatus($("microphone-inputs")),
   status: (text) => { $("performance-status").textContent = text; },
   score: (text) => { $("score").textContent = text; },
   recording: (blob, title) => {
@@ -110,7 +112,7 @@ const player = new BrowserPlayer(services, {
     const mixer = new AudioMixer(context, source, gate); mixer.apply(preferences); return mixer;
   },
   trackReady: (song) => presentation?.prepare(song) || 0,
-  finished: (song, score) => presentation?.finish(song, score),
+  finished: (song, score, reason, inputs) => presentation?.finish(song, score, reason, inputs),
   media: $("local-media"), performance: performanceTools,
   telemetry: (data) => {
     if (socket?.connected)
@@ -296,7 +298,16 @@ function render(snapshot) {
   }));
   $("song-scores").replaceChildren(...(room.scores || []).slice().reverse().map(score => {
     const row = document.createElement("li");
-    row.textContent = `${score.title} · ${score.nickname}: ${Math.round(score.value)} / 100`;
+    row.textContent = `${score.title} · ${score.nickname}: ${score.inputs ? "Group " : ""}${score.value} / 100`;
+    if (score.inputs?.length) {
+      const inputs = document.createElement("ul");
+      inputs.append(...score.inputs.map(input => {
+        const entry = document.createElement("li");
+        entry.textContent = `${input.label}: ${input.value === null ? input.reason || "Score unavailable" : `${input.value} / 100`}`;
+        return entry;
+      }));
+      row.append(inputs);
+    }
     return row;
   }));
   player.update(room).catch(showError);

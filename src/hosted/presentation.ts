@@ -1,10 +1,12 @@
 // Encore BootManager / UIManager / PlaybackManager presentation, adapted to DOM
 // and the browser playback clock. Theme classes and sound assets stay upstream.
 import type { Preferences } from "./preferences.js";
+import type { InputScoreResult, PerformanceScore } from "../../shared/scoring.js";
+import { inputColor } from "./scoring/input-score.js";
 import { parseMidi, renderMidi } from "./midi.js";
 export interface Cue { time: number; end?: number; text: string }
 export interface SongInfo { playbackId: string; title: string; artist?: string; nickname?: string; composer?: string; lyricist?: string; bpm?: number; key?: string }
-interface Score { value: number; samples?: number; mode?: string }
+type Score = Pick<PerformanceScore, "value" | "inputs" | "aggregation">;
 interface PlayerView {
   context?: AudioContext; gate?: GainNode; loaded?: string | null; loading?: boolean;
   audio: { currentTime: number; paused: boolean; playbackRate: number };
@@ -53,6 +55,8 @@ export class Presentation {
   private scoreNumber: HTMLElement;
   private rank: HTMLElement;
   private scoreTitle: HTMLElement;
+  private scoreStatus: HTMLElement;
+  private inputResults: HTMLElement;
   private leaderboard: HTMLElement;
   private startupLayer?: HTMLElement;
   private introStarted = 0;
@@ -95,7 +99,9 @@ export class Presentation {
     this.rank = node("div", "rank-display-text"); main.append(this.scoreNumber, this.rank);
     this.leaderboard = node("div", "score-session-leaderboard");
     const skip = node("button", "score-skip-hint", "PRESS ENTER TO CONTINUE"); skip.addEventListener("click", () => this.skip());
-    this.results.append(this.scoreTitle, main, this.leaderboard, skip);
+    this.scoreStatus = node("p", "score-unavailable-reason");
+    this.inputResults = node("div", "score-input-results");
+    this.results.append(this.scoreTitle, main, this.scoreStatus, this.inputResults, this.leaderboard, skip);
     shell.append(this.intro, this.countdown, this.interlude, this.results);
     document.addEventListener("keydown", this.onKey);
     window.addEventListener("pagehide", () => this.dispose(), { once: true });
@@ -212,16 +218,34 @@ export class Presentation {
     if (this.introWasShown) this.showIntro(song);
     return this.introWasShown ? 2900 : 0;
   }
-  finish(song: SongInfo, score?: Score): void {
+  finish(song: SongInfo, score?: Score, reason?: string, inputs: InputScoreResult[] = score?.inputs || []): void {
     if (!this.preferences.celebrations || !this.player.valid()) return;
     this.skip(false); this.resultSong = song; this.resultScore = score;
     this.resultStarted = performance.now(); this.results.hidden = false;
     this.results.classList.remove("show-leaderboard"); this.results.classList.add("visible");
-    this.scoreTitle.textContent = score ? (song.nickname ? `${song.nickname.toUpperCase()}'S SCORE` : "YOUR SCORE") : "SONG COMPLETE";
+    this.scoreTitle.textContent = inputs.length ? "GROUP SCORE" : song.nickname ? `${song.nickname.toUpperCase()}'S SCORE` : "YOUR SCORE";
+    this.inputResults.replaceChildren();
+    this.inputResults.hidden = !inputs.length;
+    if (inputs.length) {
+      this.inputResults.append(node("p", "score-group-method", "Group = average of available microphone scores. Each microphone is scored against the full song."));
+      for (const input of inputs) {
+        const row = node("div", "score-input-row"); row.style.setProperty("--input-color", inputColor(input.id));
+        row.append(node("span", "", input.label), node("strong", "", input.value === null ? "UNAVAILABLE" : `${input.value} / 100`));
+        if (input.value === null && input.reason) row.append(node("small", "", input.reason));
+        this.inputResults.append(row);
+      }
+    }
+    this.scoreStatus.hidden = !!score;
+    this.scoreStatus.textContent = score ? "" : reason || "Not enough vocal samples were captured to calculate a score. Check your microphone and try again.";
     this.rank.textContent = ""; this.rank.style.transform = "scale(0.8)"; this.rank.style.opacity = "0";
-    this.scoreNumber.textContent = score ? "0" : "♪"; this.leaderboard.classList.add("hidden");
-    this.player.resultsUntil = performance.now() + 14000;
-    this.resultTimer = setTimeout(() => this.skip(), 14000);
+    this.scoreNumber.textContent = score ? "0" : "—";
+    if (!score) {
+      this.rank.textContent = "SCORE UNAVAILABLE";
+      this.rank.style.color = "#ffca28"; this.rank.style.transform = "scale(1)"; this.rank.style.opacity = "1";
+    }
+    this.leaderboard.classList.add("hidden");
+    this.player.resultsUntil = performance.now() + 18000;
+    this.resultTimer = setTimeout(() => this.skip(), 18000);
     this.hideStage();
     if (score) {
       const s = Math.floor(score.value);
@@ -244,7 +268,7 @@ export class Presentation {
     const elapsed = performance.now() - this.resultStarted;
     if (this.resultScore) {
       const s = Math.floor(this.resultScore.value), progress = Math.min(1, elapsed / 3800);
-      this.scoreNumber.textContent = String(Math.floor(s * (1 - (1 - progress) ** 3)));
+      this.scoreNumber.textContent = progress === 1 ? String(this.resultScore.value) : String(Math.floor(s * (1 - (1 - progress) ** 3)));
       if (progress === 1 && !this.rank.textContent) {
         const [rank, color] = rankForScore(s); this.rank.textContent = rank; this.rank.style.color = color;
         Object.assign(this.rank.style, { transform: "scale(1)", opacity: "1", transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)" });
@@ -263,8 +287,8 @@ export class Presentation {
       row.append(node("span", "score-lb-rank", `#${i + 1}`), avatar, details, node("span", "score-lb-score", String(Math.floor(score.value))));
       grid.append(row);
     }
-    this.results.classList.toggle("show-leaderboard", elapsed >= 5300 && scores.length > 0);
-    this.leaderboard.classList.toggle("hidden", elapsed < 5300 || !scores.length);
+    this.results.classList.toggle("show-leaderboard", elapsed >= 10000 && scores.length > 0);
+    this.leaderboard.classList.toggle("hidden", elapsed < 10000 || !scores.length);
   }
   private startConfetti(): void {
     // Same celebratory colors/count as upstream; canvas keeps this self-contained.

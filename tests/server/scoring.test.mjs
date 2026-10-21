@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { PitchScoring, pitchSimilarity, computeSingableTime } from "../../src/hosted/scoring/state.js";
 import { ReferenceScore, midiReference, vocalReference } from "../../src/hosted/scoring/reference.js";
 import { PerformanceTools } from "../../src/hosted/performance.js";
+import { InputScore } from "../../src/hosted/scoring/input-score.js";
+import { inputStatusText } from "../../src/hosted/input-status.js";
 
 const reference = (duration = 4) => midiReference([{ time: 0, duration, pitch: 69 }]);
 function perform(step, missing = false) {
@@ -90,7 +92,9 @@ test("track replacement resets scoring; late reference preparation cannot update
   const player = { guideNotes: [{ time: 0, duration: 4, pitch: 69 }] };
   await tools.prepareReference(player, {}, null, () => true);
   assert.equal(tools.mode, "guide");
-  tools.referenceScore = perform(0.05);
+  const input = new InputScore({ id: "local", label: "Display microphone", source: "display" }, tools.reference, 0);
+  input.referenceScore = perform(0.05);
+  tools.inputScores.set("local", input);
   assert.equal(tools.result().value, 100);
   tools.trackChanged();
   assert.equal(tools.result(), undefined);
@@ -100,7 +104,7 @@ test("track replacement resets scoring; late reference preparation cannot update
   tools.trackChanged();
   resolve(new ArrayBuffer(0));
   await pending;
-  assert.equal(tools.referenceScore, null);
+  assert.equal(tools.inputScores.size, 0);
   assert.equal(tools.references.size, 0);
 });
 
@@ -120,7 +124,8 @@ test("display performance tools use Nightingale scoring and retain missed-vocal 
     player.audio.currentTime = frame * 0.05;
     tools.update(player);
   }
-  assert.deepEqual(tools.result(), { value: 50, samples: 80, mode: "guide" });
+  assert.deepEqual(tools.result(), { value: 50, samples: 80, mode: "guide", aggregation: "mean",
+    inputs: [{ id: "local", label: "Display microphone", source: "display", value: 50, samples: 80, mode: "guide" }] });
   assert.ok(labels.at(-1).startsWith("Nightingale pitch match"));
 });
 
@@ -128,16 +133,19 @@ test("live references score queued microphone samples once data arrives and with
   const tools = new PerformanceTools({ status() {}, score() {}, recording() {} });
   tools.setLatency(0);
   tools.beginLiveReference();
-  tools.pendingScores.push({ time: 0.05, hz: 440, rate: 1 }, { time: 0.1, hz: 440, rate: 1 });
+  const input = new InputScore({ id: "phone", label: "Phone 1", source: "phone" }, tools.reference, 0);
+  tools.inputScores.set("phone", input);
+  input.update(.05, 440, 0, 1, tools.liveReference);
+  input.update(.1, 440, 0, 1, tools.liveReference);
   tools.updateLiveReference({ pitches: Array(100).fill(440), step: 1024 / 44100,
     through: 2, singable: 2, complete: false });
-  assert.equal(tools.pendingScores.length, 0);
-  assert.ok(tools.referenceScore.scorer.earned > 0);
+  assert.equal(input.pending.length, 0);
+  assert.ok(input.referenceScore.scorer.earned > 0);
   assert.equal(tools.result(), undefined);
-  const earned = tools.referenceScore.scorer.earned;
+  const earned = input.referenceScore.scorer.earned;
   tools.updateLiveReference({ pitches: Array(100).fill(440), step: 1024 / 44100,
     through: 2, singable: 2, complete: true });
-  assert.equal(tools.referenceScore.scorer.earned, earned);
+  assert.equal(input.referenceScore.scorer.earned, earned);
   assert.throws(() => tools.updateLiveReference({ pitches: [], step: 1024 / 44100,
     through: 1, singable: 1, complete: true }), /invalid_live_reference/);
   tools.trackChanged();
@@ -195,3 +203,69 @@ for (const mode of ["guide", "stability", "live"]) {
     assert.equal(tools.remoteInputs.size, 0);
   });
 }
+
+for (const live of [false, true]) {
+  test(`simultaneous microphones receive independent ${live ? "streamed" : "prepared"} scores and an equal group average`, async () => {
+    const activity = [];
+    const tools = new PerformanceTools({ status() {}, score() {}, inputs: rows => activity.push(rows) });
+    const player = { guideNotes: [{ time: 0, duration: 4, pitch: 69 }], valid: () => true,
+      loaded: "song", audio: { currentTime: 0, paused: false, playbackRate: 1 } };
+    tools.setLatency(0);
+    if (live) tools.beginLiveReference(); else await tools.prepareReference(player, {}, null, () => true);
+    const reads = { display: 0, phone: 0 };
+    const analyser = (id, frequency) => ({ disconnect() {}, getFloatTimeDomainData(buffer) {
+      reads[id]++;
+      buffer.forEach((_, i) => { buffer[i] = .3 * Math.sin(2 * Math.PI * frequency * i / 48000); });
+    } });
+    tools.context = { sampleRate: 48000 };
+    tools.buffer = new Float32Array(2048);
+    tools.analyser = analyser("display", 440);
+    tools.attachRemoteMicrophone("phone", { connect() {}, disconnect() {} },
+      { sampleRate: 48000, createAnalyser: () => analyser("phone", 440 * 2 ** .5) }, "Alex");
+    for (let frame = 1; frame <= 80; frame++) {
+      player.audio.currentTime = frame * .05; tools.update(player);
+    }
+    assert.deepEqual(reads, { display: 80, phone: 80 });
+    assert.equal(activity.at(-1).length, 2);
+    assert.ok(activity.at(-1).every(input => input.rms > .1 && input.pitch !== null));
+    assert.notEqual(activity.at(-1)[0].color, activity.at(-1)[1].color);
+    assert.match(inputStatusText(activity.at(-1)[1]), /Voice detected/);
+    if (live) {
+      assert.equal(tools.result(), undefined);
+      tools.updateLiveReference({ pitches: Array(173).fill(440), step: 1024 / 44100,
+        through: 4, singable: 4, complete: true });
+    }
+    const result = tools.result();
+    assert.equal(result.inputs[0].value, 100);
+    assert.ok(result.inputs[1].value < 1, "a perfect display voice cannot mask an out-of-tune phone");
+    assert.equal(result.inputs[1].label, "Phone 1 · Alex");
+    assert.equal(result.value, 50);
+    assert.equal(result.aggregation, "mean");
+    tools.detachRemoteMicrophone("phone");
+    assert.equal(tools.result().inputs[1].value, result.inputs[1].value, "retain finished phone scores after disconnect");
+    tools.trackChanged();
+    assert.equal(tools.result(), undefined);
+    assert.equal(tools.inputScores.size, 0);
+  });
+}
+
+test("one delayed input cannot suppress another input's result; unavailable inputs are excluded from the group", () => {
+  const tools = new PerformanceTools({ status() {}, score() {} }); tools.beginLiveReference();
+  const good = new InputScore({ id: "one", source: "phone", label: "Phone 1" }, tools.reference, 0);
+  const failed = new InputScore({ id: "two", source: "phone", label: "Phone 2" }, tools.reference, 0);
+  tools.inputScores.set("one", good); tools.inputScores.set("two", failed);
+  for (let frame = 1; frame <= 80; frame++) good.update(frame * .05, 440, 0, 1, tools.liveReference);
+  for (let frame = 1; frame <= 401; frame++) failed.update(frame * .05, 440, 0, 1, tools.liveReference);
+  tools.updateLiveReference({ pitches: Array(173).fill(440), step: 1024 / 44100,
+    through: 4, singable: 4, complete: true });
+  assert.equal(tools.result().value, 100);
+  assert.equal(tools.result().inputs[1].value, null);
+  assert.match(tools.result().inputs[1].reason, /fell behind/);
+});
+
+test("input diagnostics distinguish receipt from silence, pitch detection and waiting for playback", () => {
+  assert.match(inputStatusText({ active: true, pitch: null, rms: 0 }), /Silent/);
+  assert.match(inputStatusText({ active: true, pitch: null, rms: .1 }), /Audio received.*no clear pitch/);
+  assert.equal(inputStatusText({ active: true, pitch: 69, rms: .1 }), "Voice detected · A4");
+  assert.match(inputStatusText({ active: false, pitch: null, rms: 0 }), /waiting for playback/);
+});

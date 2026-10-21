@@ -2,6 +2,7 @@
 // Browser adaptation of Encore's FortePianoRoll: paged notes, gold sweep,
 // hit/miss gradients and microphone trails. Scoring still uses Nightingale.
 import { freqToSemitone, snapToRefOctave } from "./state.js";
+import { inputColor } from "./input-score.js";
 
 export const PIXELS_PER_SECOND = 150;
 export const ROLL_HEIGHT = 250;
@@ -81,7 +82,6 @@ export class HostedPianoRoll {
     ctx.beginPath(); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.15)";
     for (let i = 1; i < 8; i++) { ctx.moveTo(0, height / 8 * i); ctx.lineTo(width, height / 8 * i); }
     ctx.stroke();
-    let currentStatus = "neutral";
     for (const note of this.notes) {
       if (note.startTime > page.end) break;
       if (note.startTime + note.duration < page.start) continue;
@@ -93,7 +93,6 @@ export class HostedPianoRoll {
         note.hitStatus = hit ? "hit" : "miss";
       }
       const status = note.hitStatus || "neutral";
-      if (current) currentStatus = status;
       if (current) {
         ctx.fillStyle = status === "hit" ? "#a3e63566" : status === "miss" ? "#f8717166" : "#38bdf866";
         ctx.beginPath(); ctx.roundRect(x - 4, y - 12, barWidth + 8, 24, 12); ctx.fill();
@@ -111,10 +110,9 @@ export class HostedPianoRoll {
     for (const [size, color] of [[8, "#ffd7004d"], [4, "#ffd70099"], [2, "#ffd700"]]) {
       ctx.fillStyle = color; ctx.fillRect(page.playhead - size / 2, 0, size, height);
     }
-    singers.forEach((singer, index) => {
+    singers.forEach(singer => {
       const trail = this.trails.get(singer.id);
-      const color = singers.length > 1 ? ["#89cff0", "#f9a8d4", "#c4b5fd", "#86efac"][index % 4]
-        : PALETTE[currentStatus][0];
+      const color = singer.color || inputColor(singer.id);
       ctx.beginPath(); let previous;
       for (const point of trail) {
         if (point.pitch === null) { previous = null; continue; }

@@ -128,3 +128,24 @@ test("phone volume meter reads live audio and releases its animation and context
   assert.equal(closed, 1);
   assert.equal(disconnected, 2);
 });
+
+test("received phone audio attaches to the display scorer with its participant label", t => {
+  fixture(t, async () => {});
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "RTCPeerConnection");
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, "RTCPeerConnection", descriptor); else delete globalThis.RTCPeerConnection;
+  });
+  globalThis.RTCPeerConnection = class { connectionState = "connected"; close() {} };
+  const attached = [], connected = [];
+  const source = { connect: target => connected.push(target), disconnect() {} }, stream = {};
+  const context = { createMediaStreamSource: received => { assert.equal(received, stream); return source; } };
+  const mic = new RemoteMicrophone({ tv: true, status() {} });
+  mic.getRoom = () => ({ participants: [{ id: "phone", nickname: "Alex" }] });
+  mic.player = { valid: () => true, context, gate: {}, performanceTools: {
+    detachRemoteMicrophone() {}, attachRemoteMicrophone: (...args) => attached.push(args),
+  } };
+  const { pc } = mic.peer("phone");
+  pc.ontrack({ track: { kind: "audio", addEventListener() {} }, streams: [stream] });
+  assert.equal(connected[0], mic.player.gate);
+  assert.deepEqual(attached[0], ["phone", source, context, "Alex"]);
+});

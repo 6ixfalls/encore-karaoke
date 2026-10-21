@@ -11,7 +11,19 @@
 #tv-appliance .interlude-text { font-size: clamp(1.5rem, 4vw, 4rem); }
 #tv-appliance .interlude-tip-box { font-size: clamp(1rem, 1.7vw, 1.4rem); }
 #song-results[hidden] { display: none; }
+#song-results .score-unavailable-reason { max-width: 44rem; margin: 0 1.5rem 3rem; text-align: center; font-size: clamp(1rem, 2vw, 1.5rem); line-height: 1.5; color: #ddd; }
+#song-results .rank-display-text { font-size: clamp(1.5rem, 5vw, 6rem); text-align: center; }
 #song-results.visible { opacity: 1; pointer-events: auto; }
+#song-results { box-sizing: border-box; padding: 2rem 1rem 5rem; overflow-y: auto; }
+#song-results .score-title-text { font-size: clamp(1.5rem, 4vw, 3.5rem); text-align: center; }
+#song-results .score-display-number { font-size: clamp(5rem, 19vh, 12rem); }
+#song-results .score-main-group { margin-bottom: 2vh; flex-shrink: 0; }
+#song-results .score-input-results { width: min(44rem, 90vw); max-height: 28vh; flex-shrink: 0; overflow-y: auto; }
+#song-results .score-input-row { display: grid; grid-template-columns: 1fr auto; gap: .4rem 1rem; padding: .65rem 1rem; margin: .5rem 0; border-left: 4px solid var(--input-color); background: #ffffff0a; }
+#song-results .score-input-row span { color: var(--input-color); overflow-wrap: anywhere; }
+#song-results .score-input-row small { grid-column: 1 / -1; color: #ccc; }
+#song-results .score-group-method { font-size: .85rem; color: #bbb; text-align: center; }
+#song-results.show-leaderboard .score-input-results { visibility: hidden; }
 .celebration-confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .encore-settings details { margin: 1rem 0; border-top: 1px solid #89cff040; padding: 1rem 0; }
 .encore-settings summary { cursor: pointer; font: 700 1.5rem Rajdhani, sans-serif; color: #89cff0; }

@@ -46,7 +46,8 @@ export class RemoteMicrophone {
       const stream = streams[0] || new MediaStream([track]);
       entry.source = this.player.context.createMediaStreamSource(stream);
       entry.source.connect(this.player.mixer?.input || this.player.gate);
-      this.player.performanceTools?.attachRemoteMicrophone(id, entry.source, this.player.context);
+      const nickname = this.getRoom?.()?.participants?.find(participant => participant.id === id)?.nickname;
+      this.player.performanceTools?.attachRemoteMicrophone(id, entry.source, this.player.context, nickname);
       this.updateConnections();
       track.addEventListener?.("ended", () => { if (this.peers.get(id) === entry) this.closePeer(id); }, { once: true });
     };

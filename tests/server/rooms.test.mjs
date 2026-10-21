@@ -192,3 +192,29 @@ test("songs queued before the TV claims its lease start on claim", t => {
   assert.ok(f.state().current);
   assert.equal(f.state().desired, "playing");
 });
+
+test("room history preserves input scores and validates the combined group average", t => {
+  const f = fixture(t), grant = f.rooms.claim(f.room.id, f.host);
+  f.enqueue(); f.command(f.host, "play");
+  const report = { leaseGeneration: grant.generation, playbackId: f.state().current.playbackId, position: 4, state: "playing" };
+  f.rooms.telemetry(f.room.id, f.host, report);
+  const score = { value: 75, samples: 80, mode: "guide", aggregation: "mean", inputs: [
+    { id: "local", label: "Display microphone", source: "display", value: 100, samples: 80, mode: "guide" },
+    { id: "phone", label: "Phone 1 · Singer", source: "phone", value: 50, samples: 80, mode: "guide" },
+    { id: "silent", label: "Phone 2", source: "phone", value: null, samples: 0, mode: "guide", reason: "Not enough samples." },
+  ] };
+  const ended = { ...report, state: "ended", score };
+  for (const invalid of [
+    { ...score, value: 100 },
+    { ...score, inputs: [score.inputs[0], score.inputs[0]] },
+    { ...score, inputs: [{ ...score.inputs[0], value: Infinity }] },
+    { ...score, inputs: [{ ...score.inputs[0], label: "x".repeat(101) }] },
+    { ...score, inputs: [{ ...score.inputs[2], reason: undefined }] },
+    { ...score, inputs: Array(201).fill(score.inputs[0]) },
+  ]) assert.throws(() => f.rooms.telemetry(f.room.id, f.host, { ...ended, score: invalid }), /invalid_request/);
+  f.rooms.telemetry(f.room.id, f.host, ended);
+  const saved = f.rooms.snapshot(f.state(), f.host).scores[0];
+  assert.equal(saved.value, 75);
+  assert.equal(saved.aggregation, "mean");
+  assert.deepEqual(saved.inputs, score.inputs);
+});

@@ -862,6 +862,25 @@ test("streamed guide holds playback for lookahead and resumes after refill", asy
   assert.equal(player.audio.paused, false);
 });
 
+test("end results and telemetry share the captured score and explain unavailable scores", async t => {
+  const { player, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  const score = { value: 85, samples: 100, mode: "guide" }, finished = [];
+  let reads = 0;
+  player.performanceTools = { result: () => { reads++; return score; } };
+  player.finished = (...args) => finished.push(args);
+  player.report("ended", "first");
+  assert.equal(reads, 1);
+  assert.equal(finished[0][1], score);
+  assert.equal(reports.at(-1).score, score);
+  player.performanceTools = { result: () => undefined, unavailableReason: () => "Enable a microphone." };
+  player.report("ended", "second");
+  assert.equal(finished[1][2], "Enable a microphone.");
+  assert.equal("score" in reports.at(-1), false);
+  player.performanceTools = null;
+});
+
 test("repeated end telemetry cannot extend the score break indefinitely", async t => {
   const { player, service, room } = fixture(t);
   await player.initialize();

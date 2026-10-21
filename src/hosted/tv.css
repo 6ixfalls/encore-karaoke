@@ -27,6 +27,13 @@ body.tv #message { position: fixed; top: 16px; left: 20%; right: 20%; z-index: 1
 #tv-appliance #lyrics-canvas { display: block; margin: 0 auto; }
 #tv-appliance #score { position: absolute; top: 98px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border: 1px solid #fff3; background: #000a; border-radius: 8px; font: 600 22px Rajdhani, sans-serif; color: #ffd700; margin: 0; }
 #tv-appliance #score:empty { display: none; }
+#tv-appliance #microphone-inputs { position: absolute; top: 98px; right: 1rem; width: min(30vw, 28rem); max-height: 112px; overflow-y: auto; z-index: 21; color: #fff; }
+#tv-appliance .mic-input-empty { margin: 0; padding: .5rem; background: #080810dd; font-size: .85rem; }
+@media (max-width: 700px) {
+  #tv-appliance #microphone-inputs { top: 68px; max-height: 80px; width: 45vw; font-size: .75rem; }
+  #tv-appliance .mic-input-row { grid-template-columns: 1fr; gap: .1rem; padding: .25rem .5rem; }
+  #tv-appliance .mic-input-row meter { display: none; }
+}
 body.tv #lyrics, body.tv #next-lyrics { display: none; }
 #tv-settings-open { position: absolute; right: 1rem; bottom: 1rem; z-index: 25; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border-radius: 50%; background: #080810cc; }
 #tv-settings-open img { display: block; filter: brightness(0) invert(1); }
