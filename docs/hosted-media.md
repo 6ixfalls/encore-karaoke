@@ -18,15 +18,15 @@ Phone microphones use direct room-scoped WebRTC into the main screen's audio gat
 
 ## Live pitch staff
 
-Select **Live scoring: on** on the TV to show the optional guide (off by default). Gold bars show the extracted vocal melody over an eight-second scrolling window; the white playhead marks the note to sing now. Each enabled TV or phone microphone has a numbered, colored marker and a short pitch trail. Silence breaks the trail. A green marker ring indicates a match within half a semitone in the actual target octave.
+The live scoring guide is enabled by default on the TV. The TV is display-only; use a connected controller to find songs, manage reservations and control playback. The hosted display adapts upstream Encore’s Forte piano roll: full-width, 250-pixel pitch lanes, blue sustained melody bars, and a gold playhead with a trailing sweep. Pages advance at 150 pixels per second, with a 2.5-second lead-in before the first note. Upcoming reference notes are visible before they are sung; extracted vocal frames are grouped into sustained semitone bars. Active notes turn green for a pitch match or red for a miss.
 
-The five staff lines follow the current register, with labeled C notes identifying octaves. Large octave jumps move the staff and expand its range to keep the melody and singers visible. The visual guide preserves actual octaves even though the existing Nightingale final score accepts octave equivalence. Pausing freezes the timeline; seeking or changing songs clears the pitch trails. Missing references and instrumental passages leave the target bars empty.
+Each enabled TV or phone microphone supplies an independent colored trail and live marker. Silence breaks the trail. The guide range fits the available melody, while the final Nightingale score keeps its octave-independent comparison. Pausing freezes the timeline; seeking or changing songs clears pitch trails. Missing references and instrumental passages leave the target bars empty. The guide does not request microphone access.
 
-TV microphone permissions, recording and the 0–500 ms microphone-delay setting are under **Search songs → Microphone, scoring & recording**. The delay also aligns live pitch feedback to the reference. Showing the guide does not request microphone access; phone microphones remain controlled on each phone.
+Phone microphone controls remain on each connected controller. The TV guide does not request microphone access. Microphone-delay compensation also aligns live pitch feedback to the reference.
 
 ## Timed lyrics
 
-YouTube Music supplies lyrics when it exposes timestamps for the exact video ID being played. Start/end cues are preserved; untimed lyrics are omitted rather than assigned estimated timings. The server's lyrics provider interface supports ordered fallbacks to additional timing APIs. A missing or failed lyrics response does not block playback. YouTube Music uses an unofficial client endpoint, so availability can vary or change.
+YouTube Music supplies lyrics when it exposes timestamps for the exact video ID being played. When Music omits timestamps, the server falls back to creator-provided captions on that same video, preferring its original language, then English. Start/end cues are preserved; untimed lyrics and automatic captions are omitted rather than assigned estimated timings. A missing or failed lyrics response does not block playback. YouTube Music uses an unofficial client endpoint, so availability can vary or change.
 
 ## Recording
 

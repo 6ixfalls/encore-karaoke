@@ -12,20 +12,18 @@
   </head>
   <body>
     <header>
-      <a href="/">ENCORE <span>EnMoku!</span></a
+      <a href="/" aria-label="Encore home"><span class="brand-name">EnMoku!</span></a
       ><span id="connection" role="status">Connecting…</span
       >
     </header>
     <main>
       <p id="message" role="alert" aria-live="polite"></p>
       <section id="welcome">
-        <h1>Control karaoke</h1>
-        <p>
-          Enter the code on your TV, or scan its QR code to connect automatically.
-        </p>
         <div class="columns">
           <form id="join-form" class="card">
-            <h2>Control karaoke</h2>
+            <p class="eyebrow">ENMOKU! REMOTE</p>
+            <h1>JOIN SESSION</h1>
+            <p class="muted">Enter the code on your karaoke screen to connect.</p>
             <label
               >Nickname<input
                 id="nickname"
@@ -40,7 +38,7 @@
                 maxlength="128"
                 autocomplete="off"
                 required /></label
-            ><button>Connect remote</button>
+            ><button>CONNECT</button>
           </form>
 
         </div>
@@ -53,7 +51,7 @@
         <section id="remote-microphone" class="card" hidden><h2>Microphone</h2><button id="remote-mic-start">Enable phone microphone</button><button id="remote-mic-stop" hidden>Turn microphone off</button><p id="remote-mic-status" role="status">Use headphones or keep your phone away from the TV speakers.</p></section>
         <div class="room-heading">
           <div>
-            <p class="eyebrow">KARAOKE ROOM</p>
+            <p class="eyebrow">CONNECTED TO</p>
             <h1 id="room-title"></h1>
           </div>
         </div>
@@ -120,16 +118,16 @@
         </div>
         <div class="columns">
           <section class="card">
-            <h2>Find a song on YouTube</h2>
+            <h2>SONG SEARCH</h2>
             <form id="youtube-form">
               <label>YouTube URL, ID, or search<input id="youtube-query" maxlength="200" required placeholder="Paste a YouTube link or search" /></label>
-              <button>Find / queue video</button>
+              <button>SEARCH / RESERVE</button>
             </form>
             <p class="muted">Search YouTube or paste a YouTube / YouTube Music link. An internet connection is required.</p>
             <div id="youtube-results"></div>
           </section>
           <section class="card">
-            <h2>Up next</h2>
+            <h2>RESERVATION QUEUE</h2>
             <p id="queue-empty" class="muted">Queue a song to start singing.</p>
             <ol id="song-queue"></ol>
             <h2>Recent scores</h2>

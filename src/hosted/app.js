@@ -3,6 +3,7 @@ import { BrowserPlayer } from "./player.js";
 import { PitchStaff } from "./scoring/staff.js";
 import { PerformanceTools } from "./performance.js";
 import { mountTV } from "./tv.js";
+import { mountController } from "./controller.js";
 import { RemoteMicrophone } from "./remote-microphone.js";
 import { youtubeId } from "./youtube.js";
 import { HostedLyrics } from "./lyrics.js";
@@ -12,6 +13,7 @@ const services = new BrowserServices();
 let tv = location.pathname === "/tv";
 const dashboard = $("dashboard");
 if (!dashboard) document.body.classList.add(tv ? "tv" : "control");
+if (!dashboard && !tv) mountController();
 let renderTV = tv ? mountTV() : null;
 if (tv) $("welcome").hidden = true;
 const remoteMicrophone = new RemoteMicrophone({ tv, status: (message) => { $("remote-mic-status").textContent = message; } });
@@ -56,6 +58,12 @@ const isHost = () => session?.role === "host";
 const recordingUrls = [];
 let lyricRenderer;
 const staff = new PitchStaff($("pitch-staff"), $("pitch-canvas"));
+function setLiveScoring(enabled) {
+  staff.setEnabled(enabled);
+  $("toggle-scoring").setAttribute("aria-pressed", String(enabled));
+  $("toggle-scoring").textContent = `Live scoring: ${enabled ? "on" : "off"}`;
+}
+setLiveScoring(tv);
 const performanceTools = new PerformanceTools({
   staff,
   status: (text) => { $("performance-status").textContent = text; },
@@ -87,6 +95,7 @@ const player = new BrowserPlayer(services, {
     if (tv) {
       lyricRenderer ||= new HostedLyrics($("lyrics-canvas"));
       lyricRenderer.update(player.lines, player.audio.currentTime);
+      $("tv-appliance").classList.toggle("has-lyrics", !!(current || next));
     }
   },
   error: showError,
@@ -283,9 +292,7 @@ $("youtube-form").addEventListener("submit", run(async () => {
   }));
 }));
 $("toggle-scoring").addEventListener("click", () => {
-  staff.setEnabled(!staff.enabled);
-  $("toggle-scoring").setAttribute("aria-pressed", String(staff.enabled));
-  $("toggle-scoring").textContent = `Live scoring: ${staff.enabled ? "on" : "off"}`;
+  setLiveScoring(!staff.enabled);
 });
 $("mic-latency").addEventListener("change", run(() => {
   performanceTools.setLatency($("mic-latency").value);
@@ -380,6 +387,7 @@ if (dashboard) {
     dashboard.hidden = true;
     document.body.className = "tv";
     $("welcome").hidden = true;
+    setLiveScoring(true);
     renderTV = mountTV();
     history.pushState(null, "", "/tv");
     const audioReady = player.initialize();

@@ -35,7 +35,7 @@ const lines = [
 ];
 const text = (line) => line.syllables.map((part) => part.text).join("");
 
-test("hosted lyrics alternate in the original renderer and rewind to dim previews", (t) => {
+test("hosted lyrics alternate in the original renderer and rewind to earlier cues", (t) => {
   const { renderer, engine } = fixture(t);
   renderer.update(lines, 2);
   assert.deepEqual(engine.renderableLines.map(text), ["First lyric", "Second lyric"]);
@@ -44,20 +44,23 @@ test("hosted lyrics alternate in the original renderer and rewind to dim preview
   assert.deepEqual(engine.renderableLines.map(text), ["Final lyric", "Second lyric"]);
   assert.deepEqual(engine.renderableLines.map((line) => line.isNextLine), [true, false]);
   renderer.update(lines, 9);
-  assert.deepEqual(engine.renderableLines.map(text), ["Final lyric", "Second lyric"]);
-  renderer.update(lines, 0);
+  assert.deepEqual(engine.renderableLines.map(text), ["Final lyric"]);
+  renderer.update(lines, 1.9);
   assert.deepEqual(engine.renderableLines.map(text), ["First lyric", "Second lyric"]);
-  assert.ok(engine.renderableLines.every((line) => line.isNextLine));
-  assert.equal(engine.currentMediaTime, 0);
+
+  assert.equal(engine.currentMediaTime, 1.9);
   assert.equal(engine.lastMediaTimeUpdate, null);
 });
 
-test("lyric gaps expire the active cue and stopping clears the animation", (t) => {
+test("short lyric gaps keep the sung line and final cues linger before clearing", (t) => {
   const { renderer, engine, frames } = fixture(t);
   renderer.update(lines, 6);
+  assert.deepEqual(engine.renderableLines.map(text), ["Final lyric", "Second lyric"]);
+  renderer.update(lines, 8.8);
+  assert.equal(text(engine.renderableLines[1]), "Second lyric");
+  renderer.update(lines, 12.25);
   assert.deepEqual(engine.renderableLines.map(text), ["Final lyric"]);
-  assert.equal(engine.renderableLines[0].isNextLine, true);
-  renderer.update(lines, 12);
+  renderer.update(lines, 12.51);
   assert.deepEqual(engine.renderableLines, []);
   renderer.update([], 0);
   assert.equal(frames.size, 0);

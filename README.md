@@ -6,6 +6,14 @@ The hosted path supports **YouTube Music search and metadata through yt-dlp, see
 
 ## Run locally
 
+To build and start the full container from the current working tree, with yt-dlp, FFmpeg, Python dependencies and model weights included:
+
+```sh
+npm run start:container
+```
+
+Requires a running Docker daemon with Compose. The command rebuilds the image, replaces the local container when needed, and stays attached in the foreground, streaming its logs. Keep the terminal open while using the app, then press Ctrl+C to stop it. Once the server is ready, open [localhost:3000](http://localhost:3000). It listens on loopback only, using CPU separation and a Docker volume for temporary media. The first build downloads dependencies and model weights; later builds reuse cached layers. Run `npm run stop:container` to stop and remove the local container. Stop any existing server on port 3000 before starting the container.
+
 Use Node.js 24 LTS. Install yt-dlp, FFmpeg and the Python dependencies in `server/separation-requirements.txt` for playback, or use the provided container with dependencies and model weights included.
 
 ```sh

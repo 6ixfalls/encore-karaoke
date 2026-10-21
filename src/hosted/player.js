@@ -1,3 +1,5 @@
+import { lyricFrame } from "./lyrics-timing.js";
+
 export class BrowserPlayer {
   constructor(services, { telemetry, lyrics, error, released, media, performance: performanceTools }) {
     Object.assign(this, { services, telemetry, lyrics, error, released });
@@ -472,12 +474,10 @@ export class BrowserPlayer {
         !this.audio.paused && this.referenceSnapshot.through - position < 7 && !this.guideBuffering)
       this.update(this.room).catch(this.error);
     this.performanceTools?.update(this);
-    const index = (this.lines || []).findLastIndex(
-      (line) => line.time <= position,
-    );
+    const { index, showCurrent, showNext } = lyricFrame(this.lines, position);
     this.lyrics(
-      index < 0 ? "" : position >= (this.lines[index].end ?? Infinity) ? "" : this.lines[index].text,
-      this.lines?.[index + 1]?.text || "",
+      showCurrent ? this.lines[index].text : "",
+      showNext ? this.lines[index + 1].text : "",
     );
   }
   disconnected() {

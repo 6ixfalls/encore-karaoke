@@ -3,79 +3,69 @@
 @import "../styles/menu.css";
 @import "../styles/modals.css";
 @import "../styles/search-queue.css";
-@font-face {
-  font-family: "Radio Canada";
-  src: url("../assets/fonts/radio-canada-v26-latin-700.woff2") format("woff2");
-  font-weight: 700 900;
-  font-display: swap;
-}
+@import "../styles/forte-roll.css";
+@font-face { font-family: "Radio Canada"; src: url("../assets/fonts/radio-canada-v26-latin-regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Radio Canada"; src: url("../assets/fonts/radio-canada-v26-latin-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Radio Canada"; src: url("../assets/fonts/radio-canada-v26-latin-700.woff2") format("woff2"); font-weight: 700 900; font-display: swap; }
 body.tv { background: #080810; font-family: RadioCanada, sans-serif; }
 body.tv:has(#room:not([hidden])) { overflow: hidden; }
 body.tv:has(#room:not([hidden])) > header, body.tv:has(#room:not([hidden])) footer { display: none; }
 body.tv main { max-width: none; padding: 0; }
 body.tv #welcome, body.tv #lobby { padding: 40px; }
-body.tv #message { position: fixed; top: 12px; left: 20%; right: 20%; z-index: 100; }
+body.tv #message { position: fixed; top: 16px; left: 20%; right: 20%; z-index: 100; }
 #tv-appliance { position: fixed; inset: 0; color: white; background: #080810; isolation: isolate; z-index: 0; }
-#tv-appliance .overlay-ui { background: transparent; pointer-events: none; }
+#tv-appliance .tv-background { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .7; }
+#tv-appliance .overlay-ui { pointer-events: none; }
 #tv-appliance .stage { position: absolute; inset: 0; border: 0; border-radius: 0; padding: 0; margin: 0; background: transparent; }
 #tv-appliance #local-media { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; object-fit: contain; }
-#tv-appliance .player-ui { bottom: 7rem; z-index: 12; }
+#tv-appliance .player-ui { z-index: 12; padding-bottom: 5vh; background: transparent; }
+#tv-appliance .player-ui::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to top, #000e, transparent 55%); opacity: 0; }
+#tv-appliance.has-lyrics .player-ui::before { opacity: 1; }
 #tv-appliance #lyrics-canvas { display: block; }
-#tv-appliance #score { position: absolute; bottom: 0; }
+#tv-appliance #score { position: absolute; top: 98px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border: 1px solid #fff3; background: #000a; border-radius: 8px; font: 600 22px Rajdhani, sans-serif; color: #ffd700; margin: 0; }
+#tv-appliance #score:empty { display: none; }
 body.tv #lyrics, body.tv #next-lyrics { display: none; }
-#tv-appliance .tv-dock { position: absolute; bottom: 3rem; left: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 12px; z-index: 26; }
-#tv-appliance #play-controls { justify-content: center; background: #080810dd; border-radius: 12px; padding: .5rem; margin: 0; }
-#tv-appliance #seek-form { flex: 1; max-width: 440px; }
-#tv-appliance #seek { max-width: none; }
-#tv-appliance .top-bar-container { z-index: 15; }
+#tv-appliance.mode-menu:not(.mode-player) #play-controls { display: none; }
+#tv-appliance .top-bar-container { z-index: 20; }
+#tv-appliance .info-bar-content { display: block; line-height: 48px; }
+#tv-appliance .tv-song-info { position: absolute; left: 3rem; top: 98px; max-width: 50%; text-shadow: 0 2px 8px #000; z-index: 15; }
 #tv-appliance #now-title { font-size: 28px; margin: 0; }
-#tv-appliance #now-artist { margin: 0; opacity: .7; }
-#tv-appliance #display-controls { display: none; }
-#tv-appliance .bottom-actions { z-index: 20; }
-#tv-appliance .qr-code-container { z-index: 25; opacity: 1; }
-#tv-appliance #manual-code { font-size: 24px; letter-spacing: 5px; text-align: center; color: white; }
-#tv-appliance #qr { width: 128px; height: 128px; border-radius: 0; }
-#tv-appliance .qr-image-wrapper { width: auto; height: auto; }
-#tv-appliance #tv-pairing { margin: 0; text-align: center; font-size: 12px; }
-#tv-library { position: fixed; inset: 12% 10%; overflow: auto; z-index: 40; background: #080810f5; padding: 32px; border-radius: 12px; border: 1px solid #fff3; }
-#tv-library .columns { grid-template-columns: 1fr; }
-#tv-appliance .info-bar { position: absolute; bottom: 0; width: 100%; display: flex; padding: 12px 32px; gap: 24px; background: #000b; }
+#tv-appliance #now-artist { font: 600 20px Rajdhani, sans-serif; margin: 4px 0; opacity: .7; }
+#tv-appliance #playback-status { margin: 0 0 4px; color: #89cff0; }
+#tv-appliance #tv-last-score { font-size: 14px; color: #ffd700; }
+#tv-appliance #manual-code { font-size: 26px; letter-spacing: 5px; text-align: center; color: #89cff0; margin: 8px 0 0; }
+#tv-appliance #qr { width: 112px; height: 112px; border-radius: 4px; }
 #tv-appliance .qr-image-wrapper { flex-direction: column; }
-body.tv:has(#room:not([hidden])) #host-tools { display: none; }
-#tv-appliance .bottom-actions { position: static; margin: 0; justify-content: center; }
-#tv-appliance .standby-screen { bottom: auto; top: 42%; }
-#tv-appliance .standby-text { color: white; }
-#tv-appliance .idle-hint { bottom: auto; top: 54%; text-align: center; }
-#tv-appliance .top-bar-container { right: 15rem; flex-direction: column; height: auto; }
-#tv-appliance .qr-code-container { display: grid; grid-template-columns: auto auto; }
-#tv-appliance #tv-pairing { grid-column: 1 / -1; }
-#tv-appliance .action-button { text-decoration: none; }
-@media (max-width: 700px) {
-  #tv-appliance .player-ui { bottom: 11rem; }
-  #tv-appliance .top-bar-container { left: 1rem; top: 1rem; right: 1rem; }
-  #tv-appliance .qr-code-container { right: 1rem; }
-  #tv-appliance .standby-screen { min-width: 0; max-width: 90%; }
-  #tv-appliance .bottom-actions { left: 1rem; right: 1rem; gap: .5rem; }
-  #tv-appliance .action-button { padding: .75rem; font-size: 1rem; }
-  #tv-library { inset: 5% 3%; padding: 16px; }
-  #tv-library .columns { grid-template-columns: 1fr; }
-}
-#tv-appliance .player-ui[hidden] { display: none; }
-#tv-appliance #tv-pairing { justify-self: center; white-space: nowrap; }
-#tv-appliance #pitch-staff { position: absolute; top: 19%; left: 5%; right: 5%; z-index: 14; pointer-events: none; }
-#tv-library #display-controls { margin-top: 1rem; }
-#tv-library details { margin-top: 1.5rem; }
-#tv-appliance #toggle-scoring[aria-pressed="true"] { border-color: #6ee7ff; color: #6ee7ff; background: #172d3a; }
-@media (max-height: 600px) {
-  #tv-appliance #pitch-staff { top: 17%; left: 2%; right: 2%; }
-  #tv-appliance #pitch-canvas { height: 110px; }
-}
-
+#tv-appliance #tv-pairing { grid-column: 1 / -1; justify-self: end; margin: 0; font: 600 12px Rajdhani, sans-serif; letter-spacing: 1px; }
+#tv-appliance .qr-code-container { display: grid; grid-template-columns: auto auto; opacity: 1; }
+#tv-appliance .standby-screen { bottom: 24%; }
+#tv-appliance .idle-hint { bottom: 18%; text-align: center; white-space: nowrap; }
+#tv-appliance #pitch-staff { position: absolute; top: calc(2rem + 50px + 1rem + 6.3rem + 1rem); left: 0; width: 100%; height: 250px; z-index: 14; pointer-events: none; border-radius: 0; border-top: 2px solid #89cff080; border-bottom: 2px solid #89cff080; background: repeating-linear-gradient(0deg, transparent, transparent 2px, #ffffff08 2px, #ffffff08 4px), linear-gradient(180deg, #05050fa6, #0a0a14cc); box-shadow: 0 10px 30px #000b, inset 0 0 20px #89cff01a; }
+#tv-appliance #pitch-canvas { display: block; width: 100%; height: 100%; }
 #tv-appliance.mode-menu:not(.mode-player) #pitch-staff { visibility: hidden; }
+body.tv:has(#room:not([hidden])) #host-tools { display: none; }
+@media (max-height: 650px) {
+  #tv-appliance #pitch-staff { top: 155px; height: 160px; }
+  #tv-appliance .tv-song-info { top: 85px; }
+  #tv-appliance #now-title { font-size: 22px; }
+  #tv-appliance #tv-last-score { display: none; }
+  #tv-appliance #qr { width: 64px; height: 64px; }
+  #tv-appliance #manual-code { font-size: 20px; margin: 4px 0 0; }
+}
 @media (max-width: 700px) {
-  #tv-appliance #qr { width: 72px; height: 72px; }
-  #tv-appliance .qr-code-container { top: 85px; padding: 8px; }
-  #tv-appliance #manual-code { margin: 6px 0; font-size: 18px; }
-  #tv-appliance #pitch-staff { top: 28%; }
-  #tv-appliance #pitch-canvas { height: 110px; }
+  #tv-appliance .top-bar-container { top: 1rem; left: 1rem; right: 1rem; gap: 8px; }
+  #tv-appliance .system-indicators { display: none; }
+  #tv-appliance .info-bar-label { flex-basis: 90px; font-size: 16px; }
+  #tv-appliance .info-bar-content { padding: 0 12px; font-size: 20px; }
+  #tv-appliance .tv-song-info { left: 1rem; top: 85px; max-width: 60%; }
+  #tv-appliance #now-title { font-size: 22px; }
+  #tv-appliance .qr-code-container { right: 1rem; top: 85px; gap: 6px; }
+  #tv-appliance .qr-counter-badge { display: none; }
+  #tv-appliance #qr { width: 64px; height: 64px; }
+  #tv-appliance #manual-code { font-size: 18px; letter-spacing: 3px; margin: 4px 0 0; }
+  #tv-appliance #tv-pairing { font-size: 10px; }
+  #tv-appliance .standby-screen { min-width: 0; max-width: 95%; }
+  #tv-appliance .standby-text { font-size: 24px; }
+  #tv-appliance .idle-hint { font-size: 12px; letter-spacing: 1px; }
+  #tv-appliance #score { font-size: 16px; top: 175px; width: max-content; max-width: 90%; }
 }

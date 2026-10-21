@@ -27,14 +27,19 @@ await fs.copyFile("src/hosted/index.html", "dist/web/app.html");
 await esbuild.build({ entryPoints: ["src/hosted/tv.css"], bundle: true, outfile: "dist/web/tv.css", loader: { ".woff2": "file" }, assetNames: "assets/fonts/[name]" });
 await fs.copyFile("src/hosted/style.css", "dist/web/style.css");
 await fs.copyFile("src/icons/icon.png", "dist/web/assets/icon.png");
+await fs.copyFile("src/assets/video/bgv/3d/1.mp4", "dist/web/assets/standby.mp4");
 for (const font of [
   "rajdhani-v17-latin-600.woff2",
+  "rajdhani-v17-latin-700.woff2",
   "radio-canada-v26-latin-regular.woff2",
 ])
   await fs.copyFile(
     `src/assets/fonts/${font}`,
     `dist/web/assets/fonts/${font}`,
   );
+await fs.mkdir("dist/web/assets/icons", { recursive: true });
+for (const icon of ["tv-outline", "phone-portrait-outline"])
+  await fs.copyFile(`src/assets/img/icons/svg/${icon}.svg`, `dist/web/assets/icons/${icon}.svg`);
 console.log("Hosted browser build complete (core assets local; YouTube loads on demand).");
 
 await fs.copyFile("LICENSE.txt", "dist/web/LICENSE.txt");
@@ -43,4 +48,4 @@ await fs.copyFile("THIRD_PARTY_NOTICES.md", "dist/web/THIRD_PARTY_NOTICES.txt");
 execFileSync("tar", ["-czf", "dist/web/source.tar.gz", "--exclude=.DS_Store", "--exclude=__pycache__",
   "package.json", "package-lock.json", "tsconfig.server.json", "build-server.mjs",
   "eslint.config.js", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "README.md",
-  "server", "shared", "src", "tests", "docs", "deploy/Dockerfile", "deploy/compose.yaml", "deploy/compose.gpu.yaml", "deploy/Caddyfile"]);
+  "server", "shared", "src", "tests", "docs", "deploy/Dockerfile", "deploy/compose.yaml", "deploy/compose.gpu.yaml", "deploy/compose.local.yaml", "deploy/Caddyfile"]);

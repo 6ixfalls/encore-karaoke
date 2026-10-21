@@ -16,7 +16,7 @@ import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
 import { YouTube } from "./youtube.js";
 import { Separations } from "./separation.js";
-import { Lyrics } from "./lyrics.js";
+import { Lyrics, YouTubeMusicLyrics, YouTubeCaptionLyrics } from "./lyrics.js";
 import { createServer } from "node:http";
 import QRCode from "qrcode";
 import { Server } from "socket.io";
@@ -33,7 +33,8 @@ export function createApplication(store: Store, config: Configuration) {
     return req.session;
   };
   const youtube = new YouTube(config.ytDlp);
-  const separations = new Separations(config, youtube, undefined, new Lyrics());
+  const separations = new Separations(config, youtube, undefined,
+    new Lyrics([new YouTubeMusicLyrics(), new YouTubeCaptionLyrics(config.ytDlp)]));
   let transfers = 0;
   app.disable("x-powered-by");
   app.set("trust proxy", config.trustedProxies?.length ? config.trustedProxies : false);

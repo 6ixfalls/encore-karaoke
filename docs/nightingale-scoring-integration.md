@@ -76,3 +76,12 @@ The build copies the GPL license and notices to the browser distribution and
 packages the actual build inputs into `source.tar.gz`. The footer links all three.
 The container build includes these materials as well. No change was published
 or deployed by this integration work.
+
+## Display parity (October 20, 2026)
+
+The hosted display uses Encore’s Forte piano-roll presentation rather than Nightingale’s compact pitch-history graph. `src/hosted/scoring/piano-roll.js` adapts the upstream 250-pixel roll, seven horizontal guides, sustained note gradients, 150-pixel-per-second pages, gold sweep, and vocal trails to the hosted media clock. MIDI guides and extracted vocal frames provide upcoming notes. Nightingale’s scoring calculation and bounded pitch buffers remain in use, and each connected microphone supplies its own trail. EnMoku’s dark palette, Rajdhani headings, desktop remote/library split and phone navigation are shared across the hosted presentation. TV standby reuses the bundled upstream background video, queue bar, pairing badge and menu styles.
+
+Caption selection shares upstream's 150 ms lead, 500 ms linger, short-gap
+bridging below 3.5 seconds, and preview visibility in the last three seconds of
+long gaps. The existing Encore canvas typography and alternating rows remain.
+Both the canvas and text callbacks use the same cue selection rules.

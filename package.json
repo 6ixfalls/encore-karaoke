@@ -8,6 +8,8 @@
     "build:server": "tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "start:server": "npm start",
+    "start:container": "docker compose -p encore-karaoke-local -f deploy/compose.local.yaml up --build",
+    "stop:container": "docker compose -p encore-karaoke-local -f deploy/compose.local.yaml down",
     "dev": "npm run build && tsx watch server/index.ts",
     "test": "npm run lint && npm run test:server",
     "test:server": "npm run build:server && node --test tests/server/*.test.mjs",

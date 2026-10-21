@@ -5,7 +5,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY build-server.mjs tsconfig.server.json eslint.config.js LICENSE.txt THIRD_PARTY_NOTICES.md README.md ./
 COPY tests ./tests
 COPY docs ./docs
-COPY deploy/Dockerfile deploy/compose.yaml deploy/compose.gpu.yaml deploy/Caddyfile ./deploy/
+COPY deploy/Dockerfile deploy/compose.yaml deploy/compose.gpu.yaml deploy/compose.local.yaml deploy/Caddyfile ./deploy/
 COPY server ./server
 COPY shared ./shared
 COPY src ./src

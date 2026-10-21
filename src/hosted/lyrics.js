@@ -1,3 +1,4 @@
+import { lyricFrame } from "./lyrics-timing.js";
 import LyricsEngine from "../pkgs/system/managers/LyricsEngine.js";
 
 // Adapt the browser's timed lines to the original renderer. Layout, colors,
@@ -51,17 +52,19 @@ export class HostedLyrics {
     // Use the media clock directly so pauses and seeks stay exact.
     engine.currentMediaTime = position;
     engine.lastMediaTimeUpdate = null;
-    const index = lines.findLastIndex((line) => line.time <= position);
-    const expired = index >= 0 && position >= (lines[index].end ?? Infinity);
-    if (index !== this.index || expired !== this.expired) {
+    const frame = lyricFrame(lines, position);
+    const { index, showCurrent, showNext } = frame;
+    const expired = !showCurrent;
+    const preview = position < lines[index].time - .15;
+    if (index !== this.index || expired !== this.expired || showNext !== this.showNext || preview !== this.preview) {
+      this.showNext = showNext;
+      this.preview = preview;
       this.index = index;
       this.expired = expired;
-      engine.currentLrcIndex = index;
+      engine.currentLrcIndex = preview ? -1 : index;
       engine.isLrcLine2Active = index >= 0 && index % 2 !== 0;
       const current = expired ? null : engine.parsedLrc[Math.max(0, index)];
-      const last = index > 0 && index === lines.length - 1;
-      const other = last && expired ? null :
-        engine.parsedLrc[last ? index - 1 : Math.max(0, index) + 1];
+      const other = showNext ? engine.parsedLrc[index + 1] : null;
       engine.currentLrcLine1 = engine.isLrcLine2Active ? other : current;
       engine.currentLrcLine2 = engine.isLrcLine2Active ? current : other;
       engine.lrcChangeTime = performance.now();

@@ -15,6 +15,9 @@ License: GPL-3.0 (distributed here under GPL-3.0-only).
 
 Files adapted into `src/hosted/scoring/`:
 
+- `client/src/features/playback/components/pitch-graph.tsx` (canvas drawing helpers)
+- `client/src/features/playback/components/lyrics-display.tsx` (caption visibility rules)
+- `client/src/features/playback/utils/lyrics-gap.ts` (caption timing)
 - `client/src/features/playback/lib/pitch/constants.ts`
 - `client/src/features/playback/lib/pitch/detect.ts`
 - `client/src/features/playback/lib/pitch/state.ts`
@@ -24,7 +27,7 @@ Modifications dated October 19, 2026: transpiled to JavaScript, changed imports
 for Encore's modules, and connected through an Encore-specific reference and
 playback adapter. The adapter adds asynchronous preparation, MIDI references,
 0–100 room score normalization, and replay/seek accounting. These adaptations
-are also distributed under GPL-3.0-only. Nightingale's React hooks and full-file analyzer are not included. Its Demucs
+are also distributed under GPL-3.0-only. The pitch graph and caption timing were adapted on October 20, 2026 to Encore's playback clock and per-singer microphone inputs. Nightingale's React hooks and full-file analyzer are not included. Its Demucs
 normalization and residual instrumental calculation are adapted in
 `server/separation_worker.py` for live overlapping windows. Reference analysis and microphone detection use
 Pitchy, licensed under MIT. Pitchy and fft.js license notices are reproduced

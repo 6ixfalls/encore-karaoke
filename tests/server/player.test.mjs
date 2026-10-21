@@ -147,16 +147,16 @@ test("fractional lyric transitions render between telemetry reports", async t =>
   await player.update({ ...room, desired: "playing", current: { playbackId: "track", songId: "song" } });
   player.lines = [
     { time: 1.05, text: "First" },
-    { time: 1.10, text: "Second" },
-    { time: 1.15, text: "Third" },
+    { time: 1.80, text: "Second" },
+    { time: 2.55, text: "Third" },
   ];
   player.audio.currentTime = 1;
   t.mock.timers.tick(1000);
   const reportCount = reports.length;
   for (const [time, current, next] of [
     [1.05, "First", "Second"],
-    [1.10, "Second", "Third"],
-    [1.15, "Third", ""],
+    [1.70, "Second", "Third"],
+    [2.45, "Third", ""],
   ]) {
     player.audio.currentTime = time;
     t.mock.timers.tick(50);
@@ -596,7 +596,7 @@ test("tab hiding does not stop playback; pause, seek and resume retain the loade
   assert.deepEqual(rendered.at(-1), ["First", "Next"]);
   player.audio.currentTime = 13.5;
   player.renderLyrics();
-  assert.deepEqual(rendered.at(-1), ["", "Next"]);
+  assert.deepEqual(rendered.at(-1), ["First", "Next"]);
   await player.update({ ...seek, desired: "playing" });
   assert.equal(player.audio.currentTime, 13.5);
   assert.equal(player.audio.paused, false);
