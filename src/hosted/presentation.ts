@@ -110,18 +110,39 @@ export class Presentation {
       const span = node("span", "terebi-char", character); span.style.setProperty("--char", String(i)); title.append(span);
     }
     const tiles = node("div", "startup-tiles");
-    for (let i = 0; i < 144; i++) {
+    const columns = Math.max(1, Math.floor(window.innerWidth / 50));
+    const rows = Math.max(1, Math.floor(window.innerHeight / 50));
+    tiles.style.setProperty("--columns", String(columns));
+    tiles.style.setProperty("--rows", String(rows));
+    let lastTileDelay = 0;
+    for (let i = 0; i < columns * rows; i++) {
       const tile = node("div", "startup-tile");
-      const x = i % 16 - 7.5, y = Math.floor(i / 16) - 4;
-      tile.style.setProperty("--delay", `${Math.hypot(x, y) * 35}ms`); tiles.append(tile);
+      const x = i % columns - (columns - 1) / 2, y = Math.floor(i / columns) - (rows - 1) / 2;
+      const delay = Math.hypot(x, y) * 35;
+      lastTileDelay = Math.max(lastTileDelay, delay);
+      tile.style.setProperty("--delay", `${delay}ms`); tiles.append(tile);
     }
+    // First reveal the desktop intro's white backing, then fade it into the TV.
+    // Wait for the outermost tile even on large displays before starting the fade.
+    tiles.style.setProperty("--reveal-delay", `${1700 + lastTileDelay}ms`);
+    const finish = () => {
+      if (this.startupLayer !== layer) return;
+      clearTimeout(this.startupTimer);
+      layer.remove(); this.startupLayer = undefined; this.stopSound();
+    };
+    tiles.addEventListener("animationend", (event) => {
+      if (event.target !== tiles || event.animationName !== "startupReveal") return;
+      finish();
+    });
     const skip = node("button", "startup-skip", "Skip intro"); skip.addEventListener("click", () => this.skip());
     layer.append(tiles, warning, title, skip); this.shell.append(layer); this.startupLayer = layer;
     this.startupTimer = setTimeout(() => {
       if (this.startupLayer !== layer) return;
       layer.classList.add("animating"); warning.hidden = true;
+      // Reduced motion disables animations, so animationend may never fire.
+      // Allow the full reveal duration plus a small margin before falling back.
+      this.startupTimer = setTimeout(finish, 1700 + lastTileDelay + 650 + 100);
       void this.playSound("/assets/audio/startup.wav", .65);
-      this.startupTimer = setTimeout(() => { layer.remove(); this.startupLayer = undefined; this.stopSound(); }, 2400);
     }, 4000);
   }
   private async playSound(url: string, volume = .5): Promise<void> {

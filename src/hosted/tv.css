@@ -46,6 +46,8 @@ body.tv #lyrics, body.tv #next-lyrics { display: none; }
 #tv-appliance #qr { width: 112px; height: 112px; border-radius: 4px; }
 #tv-appliance .qr-image-wrapper { flex-direction: column; }
 #tv-appliance #tv-pairing { grid-column: 1 / -1; justify-self: end; margin: 0; font: 600 12px Rajdhani, sans-serif; letter-spacing: 1px; }
+#tv-appliance .qr-connection-counts { display: grid; gap: .5rem; }
+#tv-appliance #tv-mic-badge.has-microphones { color: #4ade80; border-color: #4ade80; }
 #tv-appliance .qr-code-container { display: grid; grid-template-columns: auto auto; opacity: 1; }
 #tv-appliance .standby-screen { bottom: 24%; }
 #tv-appliance .idle-hint { bottom: 18%; text-align: center; white-space: nowrap; }
@@ -69,7 +71,7 @@ body.tv:has(#room:not([hidden])) #host-tools { display: none; }
   #tv-appliance .tv-song-info { left: 1rem; top: 85px; max-width: 60%; }
   #tv-appliance #now-title { font-size: 22px; }
   #tv-appliance .qr-code-container { right: 1rem; top: 85px; gap: 6px; }
-  #tv-appliance .qr-counter-badge { display: none; }
+  #tv-appliance .qr-counter-badge { padding: .3rem .4rem; font-size: 1rem; }
   #tv-appliance #qr { width: 64px; height: 64px; }
   #tv-appliance #manual-code { font-size: 18px; letter-spacing: 3px; margin: 4px 0 0; }
   #tv-appliance #tv-pairing { font-size: 10px; }

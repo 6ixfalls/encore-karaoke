@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gapPresentation, rankForScore } from "../../src/hosted/presentation.ts";
+import { Presentation, gapPresentation, rankForScore } from "../../src/hosted/presentation.ts";
 import { defaults, validatePreferences } from "../../src/hosted/preferences.ts";
 import { Romanization } from "../../dist/server/romanization.js";
 import { Romanizer } from "../../src/hosted/romanizer.ts";
@@ -55,4 +55,60 @@ test("transposition shifts the live target without changing raw reference pitche
   assert.equal(tools.displayReference.at(0)[0], 880);
   assert.deepEqual(tools.displayReference.pitches, [880, null, 880]);
   tools.setTranspose(-12); assert.equal(tools.displayReference.at(0)[0], 220);
+});
+
+
+test("startup waits for the reveal animation to finish and remains skippable", t => {
+  class Element extends EventTarget {
+    children = [];
+    properties = new Map();
+    style = { setProperty: (key, value) => this.properties.set(key, value) };
+    classes = new Set();
+    classList = { add: name => this.classes.add(name), remove: name => this.classes.delete(name) };
+    append(...children) { this.children.push(...children); }
+    setAttribute() {}
+    remove() { this.removed = true; }
+  }
+  const globals = ["document", "window"];
+  const descriptors = globals.map(key => Object.getOwnPropertyDescriptor(globalThis, key));
+  t.after(() => globals.forEach((key, i) => {
+    if (descriptors[i]) Object.defineProperty(globalThis, key, descriptors[i]); else delete globalThis[key];
+  }));
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => new Element() } });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 3840, innerHeight: 2160 } });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    preferences: { startupIntro: true }, shell: new Element(), player: { valid: () => false },
+    results: Object.assign(new Element(), { hidden: true }), soundVersion: 0,
+  });
+  presentation.startup();
+  const layer = presentation.shell.children.at(-1);
+  const tiles = layer.children[0];
+  t.mock.timers.tick(4000);
+  assert.ok(layer.classes.has("animating"));
+  t.mock.timers.tick(2400);
+  assert.ok(!layer.removed, "do not cut off the reveal with a fixed timeout on a large display");
+  const end = name => {
+    const event = new Event("animationend");
+    Object.defineProperty(event, "animationName", { value: name });
+    tiles.dispatchEvent(event);
+  };
+  end("startupTile");
+  assert.ok(!layer.removed, "individual tile animations cannot remove the overlay");
+  end("startupReveal");
+  assert.equal(layer.removed, true);
+  assert.equal(presentation.startupLayer, undefined);
+  presentation.startup();
+  const secondLayer = presentation.shell.children.at(-1);
+  presentation.skip();
+  t.mock.timers.tick(10000);
+  assert.equal(secondLayer.removed, true);
+  assert.ok(!secondLayer.classes.has("animating"), "skip cancels the pending intro");
+  presentation.startup();
+  const reducedMotionLayer = presentation.shell.children.at(-1);
+  t.mock.timers.tick(4000);
+  assert.ok(!reducedMotionLayer.removed, "the fallback allows time for the full reveal");
+  t.mock.timers.tick(10000);
+  assert.equal(reducedMotionLayer.removed, true, "dismiss even when reduced motion suppresses animationend");
+  assert.equal(presentation.startupLayer, undefined);
 });

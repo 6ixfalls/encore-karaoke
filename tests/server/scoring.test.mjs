@@ -143,3 +143,55 @@ test("live references score queued microphone samples once data arrives and with
   tools.trackChanged();
   assert.equal(tools.liveReference, null);
 });
+
+for (const mode of ["guide", "stability", "live"]) {
+  test(`phone audio produces a final ${mode} score without a TV microphone or pitch graph`, async () => {
+    const tools = new PerformanceTools({ status() {}, score() {}, recording() {} });
+    const player = { guideNotes: [{ time: 0, duration: 4, pitch: 69 }], valid: () => true,
+      loaded: "song", audio: { currentTime: 0, paused: false, playbackRate: 1 } };
+    let reads = 0, silent = false;
+    const analyser = { disconnect() {}, getFloatTimeDomainData(buffer) {
+      reads++;
+      buffer.forEach((_, i) => { buffer[i] = silent ? 0 : .3 * Math.sin(2 * Math.PI * 440 * i / 48000); });
+    } };
+    const source = { connect() {}, disconnect() {} };
+    tools.attachRemoteMicrophone("phone", source, { sampleRate: 48000, createAnalyser: () => analyser });
+    tools.setLatency(0);
+    if (mode === "guide") await tools.prepareReference(player, {}, null, () => true);
+    if (mode === "live") tools.beginLiveReference();
+    for (let frame = 1; frame <= 80; frame++) {
+      player.audio.currentTime = frame * .05;
+      tools.update(player);
+    }
+    assert.equal(reads, 80, "analyse phone audio only once per scoring frame");
+    if (mode === "live") {
+      assert.equal(tools.result(), undefined);
+      tools.updateLiveReference({ pitches: Array(173).fill(440), step: 1024 / 44100,
+        through: 4, singable: 4, complete: true });
+    }
+    assert.equal(tools.result().mode, mode === "stability" ? "stability" : "guide");
+    assert.equal(tools.result().value, 100);
+    const samples = tools.result().samples;
+    player.audio.paused = true;
+    player.audio.currentTime += .05;
+    tools.update(player);
+    assert.equal(tools.result().samples, samples);
+    assert.equal(reads, 80);
+    tools.trackChanged();
+    assert.equal(tools.result(), undefined);
+    assert.equal(tools.remoteInputs.size, 1, "phones remain attached across songs");
+    if (mode === "guide") {
+      player.audio.currentTime = 0;
+      player.audio.paused = false;
+      await tools.prepareReference(player, {}, null, () => true);
+      for (let frame = 1; frame <= 80; frame++) {
+        silent = frame > 40;
+        player.audio.currentTime = frame * .05;
+        tools.update(player);
+      }
+      assert.equal(tools.result().value, 50, "missed phone vocals reduce the final score");
+    }
+    tools.detachRemoteMicrophone("phone");
+    assert.equal(tools.remoteInputs.size, 0);
+  });
+}

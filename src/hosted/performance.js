@@ -122,20 +122,22 @@ export class PerformanceTools {
     input.source.disconnect(input.analyser); input.analyser.disconnect();
     this.remoteInputs.delete(id);
   }
-  renderStaff(player, localHz, active) {
-    if (!this.staff?.enabled) return;
+  readMicrophones(active) {
     const singers = [];
-    if (this.analyser) singers.push({ id: "local", pitch: localHz === null ? null : freqToSemitone(localHz) });
-    for (const [id, input] of this.remoteInputs) {
+    let scoringHz = null;
+    const inputs = [...(this.analyser ? [["local", this]] : []), ...this.remoteInputs];
+    for (const [id, input] of inputs) {
       let hz = null;
       if (active) {
         input.analyser.getFloatTimeDomainData(input.buffer);
         hz = detectPitchFromSamplesMic(input.detector, input.buffer, input.context.sampleRate);
       }
+      // Prefer the local microphone, then the first phone with a detected voice.
+      // Read each input once so scoring also works when the pitch graph is off.
+      if (scoringHz === null && hz !== null) scoringHz = hz;
       singers.push({ id, pitch: hz === null ? null : freqToSemitone(hz) });
     }
-    this.staff.render({ time: player.audio.currentTime, reference: this.displayReference || this.reference, singers, active,
-      latency: this.latency });
+    return { hz: scoringHz, singers };
   }
   async startMicrophone(player) {
     if (!player.valid()) throw new Error("start_display_first");
@@ -182,16 +184,14 @@ export class PerformanceTools {
     this.drawFrame?.();
     const time = player.audio.currentTime;
     const active = !!(player.valid() && !player.audio.paused && !player.loading && player.loaded);
-    if (!this.analyser || !active) {
-      this.renderStaff(player, null, active);
+    const { hz, singers } = this.readMicrophones(active);
+    if (this.staff?.enabled) this.staff.render({ time, reference: this.displayReference || this.reference, singers, active, latency: this.latency });
+    if ((!this.analyser && !this.remoteInputs.size) || !active) {
       if (!this.liveReference || !this.pendingScores.length) this.referenceScore?.anchor(time);
       this.previousPitch = null;
       return;
     }
-    this.analyser.getFloatTimeDomainData(this.buffer);
-    const hz = detectPitchFromSamplesMic(this.detector, this.buffer, this.context.sampleRate);
     const pitch = hz === null ? null : freqToSemitone(hz);
-    this.renderStaff(player, hz, active);
     if (this.liveReference) {
       if (this.pendingScores.length >= 400) {
         this.liveReference.failed = true;

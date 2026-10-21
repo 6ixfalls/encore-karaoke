@@ -21,7 +21,24 @@ if (!dashboard) document.body.classList.add(tv ? "tv" : "control");
 if (!dashboard && !tv) mountController();
 let renderTV = tv ? mountTV() : null;
 if (tv) $("welcome").hidden = true;
-const remoteMicrophone = new RemoteMicrophone({ tv, status: (message) => { $("remote-mic-status").textContent = message; } });
+const remoteMicrophone = new RemoteMicrophone({
+  tv,
+  status: (message) => { $("remote-mic-status").textContent = message; },
+  level: (value) => {
+    const meter = $("remote-mic-level");
+    meter.setAttribute("aria-valuenow", String(Math.round(value * 100)));
+    meter.style.setProperty("--level", String(value));
+  },
+  connections: (count) => {
+    const badge = $("tv-mic-badge");
+    if (!badge) return;
+    $("tv-mic-count").textContent = String(count);
+    const description = `${count} connected ${count === 1 ? "microphone" : "microphones"}`;
+    badge.setAttribute("aria-label", description);
+    badge.title = description;
+    badge.classList.toggle("has-microphones", count > 0);
+  },
+});
 
 let session,
   room,

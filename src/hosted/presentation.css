@@ -20,21 +20,24 @@
 .encore-settings input[type=checkbox] { width: 22px; height: 22px; }
 .encore-settings output { font: 600 1rem Rajdhani, sans-serif; color: #ffd700; }
 .encore-settings .muted { grid-column: 1 / -1; }
-.startup-intro { position: fixed; inset: 0; z-index: 2000; background: #080810; display: grid; place-items: center; overflow: hidden; }
+.startup-intro { position: fixed; inset: 0; z-index: 2000; background: transparent; display: grid; place-items: center; overflow: hidden; }
 .startup-warning { position: relative; text-align: center; max-width: 1000px; padding: 2rem; z-index: 3; font-family: Rajdhani, sans-serif; background: #080810; }
 .startup-warning h1 { font-size: clamp(1.5rem, 5vw, 4rem); color: #ff5555; letter-spacing: .1em; }
 .startup-warning p { font-size: clamp(1rem, 2.5vw, 1.8rem); opacity: .8; line-height: 1.5; }
 .startup-warning[hidden] { display: none; }
 .startup-title { position: absolute; font: 700 clamp(4rem, 18vw, 15rem) Rajdhani, "Noto Sans JP", sans-serif; display: flex; z-index: 2; opacity: 0; }
 .terebi-char { display: inline-block; }
-.startup-tiles { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(16, 1fr); grid-template-rows: repeat(9, 1fr); background: white; }
+.startup-tiles { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(var(--columns), 1fr); grid-template-rows: repeat(var(--rows), 1fr); background: white; }
 .startup-tile { background: #080810; }
 .startup-skip { position: absolute; bottom: 2rem; right: 2rem; z-index: 4; }
 .startup-intro.animating .startup-title { animation: startupTitle 1.5s both; }
 .startup-intro.animating .terebi-char { animation: startupChar .7s cubic-bezier(.87,0,.13,1) calc(var(--char) * 80ms) both; }
+.startup-intro.animating .startup-tiles { animation: startupReveal .65s ease-in-out var(--reveal-delay) both; }
+.startup-intro.animating .startup-skip { animation: startupReveal .2s var(--reveal-delay) both; }
 .startup-intro.animating .startup-tile { animation: startupTile .2s calc(1.5s + var(--delay)) both; }
 @keyframes startupChar { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes startupTitle { 0%, 70% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.75); } }
+@keyframes startupReveal { from { opacity: 1; } to { opacity: 0; } }
 @keyframes startupTile { from { opacity: 1; } to { opacity: 0; } }
 @media (max-width: 700px) {
   #tv-appliance .intro-card-content { flex-wrap: wrap; gap: 1rem; }

@@ -466,3 +466,11 @@ body.control #score:empty { display: none; }
   body.control #message:not(:empty) { bottom: 80px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.mic-level { --level: 0; display: flex; gap: 5px; height: 40px; margin: 16px 0 6px; }
+.mic-level-section { position: relative; flex: 1; height: 100%; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--meter-color) 18%, transparent); }
+.mic-level-section > span { display: block; height: 100%; width: clamp(0%, calc((var(--level) * 3 - var(--section)) * 100%), 100%); background: var(--meter-color); }
+.mic-level-red { --section: 0; --meter-color: #ef5350; }
+.mic-level-yellow { --section: 1; --meter-color: #facc15; }
+.mic-level-green { --section: 2; --meter-color: #4ade80; }
+.mic-level-label { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
