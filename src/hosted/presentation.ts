@@ -134,7 +134,9 @@ export class Presentation {
     const finish = () => {
       if (this.startupLayer !== layer) return;
       clearTimeout(this.startupTimer);
-      layer.remove(); this.startupLayer = undefined; this.stopSound();
+      // The sound can outlast the reveal, especially on smaller displays or
+      // while loading. Only an explicit skip or teardown should interrupt it.
+      layer.remove(); this.startupLayer = undefined;
     };
     tiles.addEventListener("animationend", (event) => {
       if (event.target !== tiles || event.animationName !== "startupReveal") return;

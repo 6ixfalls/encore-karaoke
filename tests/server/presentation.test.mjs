@@ -78,7 +78,7 @@ test("transposition shifts the live target without changing raw reference pitche
 });
 
 
-test("startup waits for the reveal animation to finish and remains skippable", t => {
+test("startup reveals without cutting off its sound and remains skippable", t => {
   class Element extends EventTarget {
     children = [];
     properties = new Map();
@@ -97,9 +97,14 @@ test("startup waits for the reveal animation to finish and remains skippable", t
   Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => new Element() } });
   Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 3840, innerHeight: 2160 } });
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  let soundStops = 0;
   const presentation = Object.assign(Object.create(Presentation.prototype), {
     preferences: { startupIntro: true }, shell: new Element(), player: { valid: () => false },
     results: Object.assign(new Element(), { hidden: true }), soundVersion: 0,
+    playSound() {
+      this.sound = { stop() { soundStops++; } };
+      return Promise.resolve();
+    },
   });
   presentation.startup();
   const layer = presentation.shell.children.at(-1);
@@ -118,9 +123,12 @@ test("startup waits for the reveal animation to finish and remains skippable", t
   end("startupReveal");
   assert.equal(layer.removed, true);
   assert.equal(presentation.startupLayer, undefined);
+  assert.equal(soundStops, 0, "the sound can finish after the reveal disappears");
+  assert.equal(presentation.soundVersion, 0, "the reveal must also allow pending audio to finish loading");
   presentation.startup();
   const secondLayer = presentation.shell.children.at(-1);
   presentation.skip();
+  assert.equal(soundStops, 1, "an explicit skip still stops the intro sound");
   t.mock.timers.tick(10000);
   assert.equal(secondLayer.removed, true);
   assert.ok(!secondLayer.classes.has("animating"), "skip cancels the pending intro");
@@ -131,4 +139,7 @@ test("startup waits for the reveal animation to finish and remains skippable", t
   t.mock.timers.tick(10000);
   assert.equal(reducedMotionLayer.removed, true, "dismiss even when reduced motion suppresses animationend");
   assert.equal(presentation.startupLayer, undefined);
+  assert.equal(soundStops, 1, "the fallback also lets the sound finish naturally");
+  presentation.skip();
+  assert.equal(soundStops, 2, "cleanup can stop audio after the overlay has disappeared");
 });
