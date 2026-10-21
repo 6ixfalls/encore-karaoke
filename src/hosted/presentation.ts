@@ -94,7 +94,7 @@ export class Presentation {
     const main = node("div", "score-main-group"); this.scoreNumber = node("div", "score-display-number");
     this.rank = node("div", "rank-display-text"); main.append(this.scoreNumber, this.rank);
     this.leaderboard = node("div", "score-session-leaderboard");
-    const skip = node("button", "score-skip-hint", "Continue · Enter / Escape"); skip.addEventListener("click", () => this.skip());
+    const skip = node("button", "score-skip-hint", "PRESS ENTER TO CONTINUE"); skip.addEventListener("click", () => this.skip());
     this.results.append(this.scoreTitle, main, this.leaderboard, skip);
     shell.append(this.intro, this.countdown, this.interlude, this.results);
     document.addEventListener("keydown", this.onKey);
@@ -196,8 +196,9 @@ export class Presentation {
     this.skip(false); this.resultSong = song; this.resultScore = score;
     this.resultStarted = performance.now(); this.results.hidden = false;
     this.results.classList.remove("show-leaderboard"); this.results.classList.add("visible");
-    this.scoreTitle.textContent = score ? `${song.nickname || "YOUR"}${song.nickname ? "'S" : ""} SCORE` : "SONG COMPLETE";
-    this.rank.textContent = ""; this.scoreNumber.textContent = score ? "0" : "♪";
+    this.scoreTitle.textContent = score ? (song.nickname ? `${song.nickname.toUpperCase()}'S SCORE` : "YOUR SCORE") : "SONG COMPLETE";
+    this.rank.textContent = ""; this.rank.style.transform = "scale(0.8)"; this.rank.style.opacity = "0";
+    this.scoreNumber.textContent = score ? "0" : "♪"; this.leaderboard.classList.add("hidden");
     this.player.resultsUntil = performance.now() + 14000;
     this.resultTimer = setTimeout(() => this.skip(), 14000);
     this.hideStage();
@@ -206,7 +207,10 @@ export class Presentation {
       const fanfare = s >= 100 ? 4 : s >= 70 ? 3 : s >= 20 ? 1 : 2;
       const url = `/assets/audio/fanfare${fanfare === 1 ? "" : `-${fanfare}`}.mid`;
       const started = this.resultStarted;
-      const audio = this.preferences.fanfare ? this.playSound(url) : Promise.resolve();
+      const audio = new Promise<void>(resolve => setTimeout(resolve, 1000)).then(() => {
+        if (this.resultStarted !== started || this.results.hidden) return;
+        return this.preferences.fanfare ? this.playSound(url) : new Promise<void>(resolve => setTimeout(resolve, 4000));
+      });
       void audio.then(() => {
         if (this.resultStarted !== started || this.results.hidden || !this.preferences.narration) return;
         return this.playSound(`/assets/audio/scores/${s >= 100 ? 100 : s >= 70 ? 70 : s >= 50 ? 50 : s >= 20 ? 20 : 0}.wav`);
@@ -222,19 +226,24 @@ export class Presentation {
       this.scoreNumber.textContent = String(Math.floor(s * (1 - (1 - progress) ** 3)));
       if (progress === 1 && !this.rank.textContent) {
         const [rank, color] = rankForScore(s); this.rank.textContent = rank; this.rank.style.color = color;
+        Object.assign(this.rank.style, { transform: "scale(1)", opacity: "1", transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)" });
         if (s >= 70 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) this.startConfetti();
       }
     }
     const scores = this.player.room?.scores || [];
     this.leaderboard.replaceChildren(node("h3", "", "TOP PERFORMANCES"));
+    const grid = node("div", "score-lb-grid"); this.leaderboard.append(grid);
     for (const [i, score] of [...scores].sort((a, b) => b.value - a.value).slice(0, 5).entries()) {
       const row = node("div", "score-lb-row");
       if (score.playbackId === this.resultSong.playbackId) row.classList.add("is-current-singer");
-      row.append(node("span", "score-lb-rank", `#${i + 1}`), node("span", "score-lb-name", `${score.nickname} · ${score.title}`), node("span", "score-lb-score", String(Math.floor(score.value))));
-      this.leaderboard.append(row);
+      const avatar = node("div", "score-lb-avatar"); avatar.style.background = "#444";
+      const details = node("div", "score-lb-details");
+      details.append(node("span", "score-lb-name", score.nickname), node("span", "score-lb-song", score.title));
+      row.append(node("span", "score-lb-rank", `#${i + 1}`), avatar, details, node("span", "score-lb-score", String(Math.floor(score.value))));
+      grid.append(row);
     }
     this.results.classList.toggle("show-leaderboard", elapsed >= 5300 && scores.length > 0);
-    this.leaderboard.hidden = elapsed < 5300 || !scores.length;
+    this.leaderboard.classList.toggle("hidden", elapsed < 5300 || !scores.length);
   }
   private startConfetti(): void {
     // Same celebratory colors/count as upstream; canvas keeps this self-contained.

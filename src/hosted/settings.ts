@@ -51,11 +51,15 @@ export function mountSettings(container: HTMLElement, preferences: Preferences,
   field(lyrics, "lyricAlignment", "Alignment", ["center", "left", "right", "alternating", "split"].map(v => [v, v]));
   field(lyrics, "lyricColor", "Lyric color", ["white", "blue", "yellow", "red", "green", "orange", "purple"].map(v => [v, v]));
   field(lyrics, "romanization", "Japanese / Korean romanization");
+  const tracks = group("Advanced · song tracks");
+  field(tracks, "playVocals", "Play original vocals");
+  field(tracks, "vocalVolume", "Vocal track volume", { min: 0, max: 1, step: .05 });
+  field(tracks, "instrumentalVolume", "Instrumental volume", { min: 0, max: 1, step: .05 });
   const sound = group("Audio mixer");
   const hint = document.createElement("p"); hint.className = "muted";
   hint.textContent = "Tempo and key are on your phone’s Remote tab. Microphone effects apply to local and phone vocals. Enable monitoring to hear local vocals; use headphones to prevent feedback.";
   sound.append(hint);
-  field(sound, "micGain", "Vocal gain", { min: 0, max: 2, step: .05 });
+  field(sound, "micGain", "Microphone gain", { min: 0, max: 2, step: .05 });
   field(sound, "monitoring", "Monitor local microphone");
   for (const [index, frequency] of EQ_BANDS.entries()) {
     const label = document.createElement("label"); label.textContent = `${frequency >= 1000 ? frequency / 1000 + 'k' : frequency} Hz EQ (dB)`;

@@ -52,6 +52,9 @@ export class BrowserPlayer {
     })) {
       media.addEventListener(event, () => {
         if (this.audio !== media) return;
+        if (event === "waiting") this.mediaWaiting = true;
+        else if (event === "playing") this.mediaWaiting = false;
+        this.syncVocals();
         if (event === "playing" && (!this.valid() || this.room?.desired !== "playing")) { media.pause(); return; }
         if (this.generation && this.loaded && this.valid()) {
           if (state === "failed") {
@@ -65,7 +68,50 @@ export class BrowserPlayer {
       });
     }
   }
+  setVocalMedia(url) {
+    if (!url || !this.mixer?.vocalTrack) return;
+    if (!this.vocals) {
+      this.vocals = new Audio();
+      this.vocals.preload = "auto";
+      this.vocals.preservesPitch = true;
+      this.vocalSource = this.context.createMediaElementSource(this.vocals);
+      this.vocalSource.connect(this.mixer.vocalTrack);
+      this.vocals.addEventListener("loadedmetadata", () => this.syncVocals());
+      this.vocals.addEventListener("canplay", () => this.syncVocals());
+    }
+    this.vocalReloaded = false;
+    this.vocals.src = url;
+  }
+  syncVocals() {
+    const vocal = this.vocals;
+    if (!vocal?.src) return;
+    const active = this.valid() && !this.audio.paused && !this.audio.ended && !this.loading && !this.seekBuffering && !this.mediaWaiting;
+    if (!active) { vocal.pause(); return; }
+    vocal.playbackRate = this.audio.playbackRate;
+    if (vocal.ended && this.referenceSnapshot?.mediaComplete && !this.vocalReloaded) {
+      this.vocalReloaded = true; vocal.load(); return;
+    }
+    if (vocal.readyState === 0 || vocal.seeking) return;
+    const position = this.audio.currentTime;
+    if (Math.abs(vocal.currentTime - position) > .12) {
+      const ranges = vocal.seekable;
+      if (ranges && !Array.from({ length: ranges.length }, (_, i) => i)
+        .some(i => position >= ranges.start(i) && position <= ranges.end(i))) {
+        vocal.pause();
+        if (this.referenceSnapshot?.mediaComplete && !this.vocalReloaded) {
+          this.vocalReloaded = true; vocal.load();
+        }
+        return;
+      }
+      vocal.currentTime = position;
+    }
+    if (vocal.paused && !vocal.ended) vocal.play().catch(() => {});
+  }
   clearMedia() {
+    this.mediaWaiting = false;
+    this.vocals?.pause();
+    this.vocals?.removeAttribute("src");
+    this.vocals?.load();
     clearTimeout(this.introTimer);
     this.referenceSnapshot = null;
     this.guideBuffering = false;
@@ -245,8 +291,7 @@ export class BrowserPlayer {
           }
           const seek = this.playbackSeek();
           // A growing response may expose a temporary duration. Only trust the
-          // media duration after reopening the finalized file; -shortest can
-          // make that file shorter than the decoded vocal reference.
+          // media duration after reopening the finalized file.
           const duration = this.seekReloaded && Number.isFinite(this.audio.duration) && this.audio.duration > 0
             ? this.audio.duration : snapshot.through;
           if (duration > endPosition + .25 || seek && seek.id !== this.seekId) {
@@ -352,12 +397,13 @@ export class BrowserPlayer {
           this.services.request(`/api/rooms/${room.id}/separation/${separated.id}/stop`, { method: "POST", body: {} }).catch(() => {});
           return;
         }
-        this.separation = { id: separated.id, roomId: room.id };
+        this.separation = { id: separated.id, roomId: room.id, vocals: separated.vocals };
         if (separated.ready === false) {
           this.separation.media = separated.media;
           this.pollSeparation(version, playbackId);
           return;
         }
+        this.setVocalMedia(separated.vocals);
         this.audio.src = separated.media;
         this.audio.hidden = false;
         this.song = { format: "youtube" };
@@ -491,6 +537,7 @@ export class BrowserPlayer {
       this.performanceTools?.updateLiveReference?.(snapshot);
       if (snapshot.lyrics) this.lines = snapshot.lyrics.lines;
       if (this.loading && snapshot.ready) {
+        this.setVocalMedia(job.vocals);
         this.audio.src = job.media;
         this.audio.hidden = false;
         this.song = { format: "youtube" };
@@ -520,6 +567,7 @@ export class BrowserPlayer {
     this.report("failed", playbackId);
   }
   renderLyrics() {
+    this.syncVocals();
     const position = this.audio.currentTime;
     if (this.referenceSnapshot && !this.referenceSnapshot.complete && !this.loading &&
         !this.audio.paused && this.referenceSnapshot.through - position < 7 && !this.guideBuffering)

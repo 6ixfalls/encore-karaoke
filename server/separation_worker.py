@@ -3,7 +3,7 @@
 # ab3304bb2f36fe8046013a97cd1d498b7a0fb6ca. Copyright Nightingale contributors.
 # Modified 2026-10-19: bounded live PCM windows, context trimming and pipe outputs;
 # uses the maintained adefossez/demucs fork. See THIRD_PARTY_NOTICES.md.
-"""stdin: 44.1 kHz stereo float32; stdout: instrumental PCM; fd 3: vocal NDJSON."""
+"""stdin: 44.1 kHz stereo float32; stdout: backing L/R + mono vocal PCM; fd 3: vocal NDJSON."""
 import base64
 import json
 import os
@@ -80,7 +80,8 @@ def main():
         backing = backing[:, left:left + count].detach().cpu().numpy().T.astype("<f4")
         metadata.write(json.dumps({"start": start, "samples": count,
                                   "vocals": base64.b64encode(vocals.tobytes()).decode("ascii")}) + "\n")
-        sys.stdout.buffer.write(backing.tobytes())
+        mixed = np.column_stack((backing, vocals)).astype("<f4")
+        sys.stdout.buffer.write(mixed.tobytes())
         sys.stdout.buffer.flush()
         start += count
         if start > RATE * 600:

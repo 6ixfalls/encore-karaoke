@@ -1,3 +1,4 @@
+import { requestMicrophone } from "./microphone.js";
 // SPDX-License-Identifier: GPL-3.0-only
 import { createMicPitchDetector, detectPitchFromSamplesMic } from "./scoring/detect.js";
 import { freqToSemitone } from "./scoring/state.js";
@@ -141,7 +142,7 @@ export class PerformanceTools {
     if (this.stream) return;
     const generation = player.generation;
     const version = this.micVersion || 0;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }, video: false });
+    const stream = await requestMicrophone(false);
     if (!player.valid() || generation !== player.generation || version !== (this.micVersion || 0)) {
       stream.getTracks().forEach((track) => track.stop());
       throw new Error("stale_display");

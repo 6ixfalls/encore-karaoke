@@ -29,7 +29,9 @@ Rooms expire after 24 hours without main-screen heartbeats; active heartbeats ex
 
 Search and playback require internet access to YouTube. Install dependencies before running the local Node server, or use the provided image. Live separation allows one job per server, limits tracks to ten minutes and starts with a sixteen-second scoring buffer; seeking while processing is limited to buffered media, with full byte ranges available when complete. Cancellation, room end, stale playback, stalled processing and shutdown terminate jobs.
 
-Microphone capture needs browser permission and a trusted HTTPS origin (localhost is allowed for development). Phone audio uses direct WebRTC without a TURN relay; typically devices need to share a LAN. Recordings remain in browser memory until downloaded and are never uploaded to the server. Download them before closing or reloading the page.
+Microphone capture needs browser permission and a trusted HTTPS origin (localhost is allowed for development). If Enable microphone immediately reports blocked access without a prompt, allow the domain in the browser’s Site settings → Microphone and allow the browser app under the phone’s app microphone permissions. Check the device-wide Microphone access switch, reload EnMoku, and try again. A reverse proxy must preserve `Permissions-Policy: microphone=(self)`; `microphone=()` blocks requests before the browser can ask.
+
+Phone audio uses direct WebRTC without a TURN relay; typically devices need to share a LAN. Recordings remain in browser memory until downloaded and are never uploaded to the server. Download them before closing or reloading the page.
 
 Check `/healthz` and `/readyz` for liveness/readiness. Run `npm run build` and `npm test` before deployment. Browser/device audio, microphone, recording and GPU behavior still require manual validation.
 

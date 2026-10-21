@@ -808,6 +808,33 @@ test("preparation honors a pause and seek issued before media becomes ready", as
   assert.equal(player.lines[0].text, "Line");
 });
 
+test("vocal media loads only when separation is playable", async t => {
+  for (const initiallyReady of [false, true]) {
+    await t.test(`initially ready: ${initiallyReady}`, async t => {
+      const { player, room, service } = fixture(t);
+      await player.initialize();
+      player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+      player.mixer = {
+        vocalTrack: {}, music: { gain: { setValueAtTime() {} } }, setTranspose() {},
+      };
+      service.request = async (_url, options) => options?.method === "POST"
+        ? { id: "job", media: "/prepared", vocals: "/vocals", ready: initiallyReady }
+        : { ready: initiallyReady, complete: initiallyReady };
+      await player.update({ ...room, current: { playbackId: "track" } });
+      if (!initiallyReady) {
+        assert.equal(player.vocals, undefined, "do not request vocals while the server rejects media requests");
+        assert.ok(!player.audio.src);
+        clearTimeout(player.separationTimer);
+        service.request = async () => ({ ready: true, complete: true });
+        await player.pollSeparation(player.loadingVersion, "track");
+      }
+      assert.equal(player.vocals.src, "/vocals");
+      assert.equal(player.audio.src, "/prepared");
+      assert.equal(player.loading, false);
+    });
+  }
+});
+
 test("streamed guide holds playback for lookahead and resumes after refill", async t => {
   const { player, service, room, reports } = fixture(t);
   await player.initialize();
@@ -1023,4 +1050,64 @@ test("buffer-edge recovery honors a newer paused seek while media finishes", asy
   assert.equal(reports.some(report => report.state === "ended"), false);
   await player.update(paused);
   assert.equal(player.audio.currentTime, 60);
+});
+
+
+test("optional vocals follow playback, tempo, seeking and lease retirement", async t => {
+  const { player, room } = fixture(t);
+  await player.initialize();
+  player.mixer = { vocalTrack: {}, silence() {} };
+  player.valid = () => true;
+  player.setVocalMedia("/vocals");
+  player.audio.currentTime = 12; player.audio.playbackRate = 1.25; player.audio.paused = false;
+  player.vocals.readyState = 2;
+  player.syncVocals();
+  assert.equal(player.vocals.currentTime, 12);
+  assert.equal(player.vocals.playbackRate, 1.25);
+  assert.equal(player.vocals.paused, false);
+  player.audio.paused = true; player.syncVocals();
+  assert.equal(player.vocals.paused, true);
+  player.audio.paused = false; player.audio.currentTime = 40;
+  player.vocals.seekable = { length: 1, start: () => 0, end: () => 20 };
+  player.referenceSnapshot = { mediaComplete: true };
+  let reloads = 0; player.vocals.load = () => { reloads++; };
+  player.syncVocals(); player.syncVocals();
+  assert.equal(reloads, 1);
+  assert.equal(player.vocals.paused, true);
+  player.vocals.seekable.end = () => 90;
+  player.syncVocals(); assert.equal(player.vocals.currentTime, 40);
+  assert.equal(player.vocals.paused, false);
+  player.valid = () => false; player.syncVocals(); assert.equal(player.vocals.paused, true);
+  player.room = room; player.clearMedia();
+  assert.equal(player.vocals.src, "");
+});
+
+test("optional vocals stay paused while backing media waits and resume in sync", async t => {
+  const { player, room } = fixture(t);
+  await player.initialize();
+  player.mixer = { vocalTrack: {} };
+  player.valid = () => true;
+  player.room = { ...room, desired: "playing" };
+  player.setVocalMedia("/vocals");
+  player.vocals.readyState = 2;
+  player.audio.currentTime = 12;
+  await player.audio.play();
+  assert.equal(player.vocals.paused, false);
+
+  player.audio.dispatchEvent(new Event("waiting"));
+  assert.equal(player.audio.paused, false, "waiting does not pause the backing element");
+  assert.equal(player.vocals.paused, true, "pause vocals immediately on waiting");
+  player.vocals.currentTime = 12.2;
+  player.syncVocals();
+  player.syncVocals();
+  assert.equal(player.vocals.paused, true);
+  assert.equal(player.vocals.currentTime, 12.2, "do not repeatedly seek vocals during buffering");
+
+  player.audio.dispatchEvent(new Event("playing"));
+  assert.equal(player.vocals.currentTime, 12);
+  assert.equal(player.vocals.paused, false);
+
+  player.audio.dispatchEvent(new Event("waiting"));
+  player.clearMedia();
+  assert.equal(player.mediaWaiting, false, "a new track must not inherit buffering state");
 });

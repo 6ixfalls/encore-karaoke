@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
@@ -13,7 +14,7 @@ export function fakeProcesses() {
   const launch = (command, args, options) => {
     const child = new EventEmitter();
     Object.assign(child, { command, args, options, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
-      stdio: [null, null, null, new PassThrough()], killed: false,
+      stdio: [null, null, null, new PassThrough(), new PassThrough()], killed: false,
       kill() { this.killed = true; } });
     children.push(child); return child;
   };
@@ -57,7 +58,7 @@ test("CUDA separation and NVIDIA video processing are independently configurable
       assert.equal(mux.args[mux.args.indexOf("-gpu") + 1], "1");
       assert.equal(mux.args[mux.args.indexOf("-c:a") + 1], "aac");
     }
-    assert.ok(mux.args.includes("1:a:0"));
+    assert.ok(mux.args.includes("[backing]"));
   }
 });
 
@@ -78,7 +79,7 @@ test("one bounded separation feeds instrumental muxing and independently supplie
   const job = await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => current);
   assert.equal(children.length, 3);
   assert.equal(children[1].args.at(-1).endsWith("separation_worker.py"), true);
-  assert.ok(children[2].args.includes("1:a:0")); // separated PCM, not the original audio
+  assert.ok(children[2].args.includes("[backing]")); // separated PCM, not the original audio
   assert.ok(children[2].args.includes("+frag_keyframe+empty_moov+default_base_moof"));
   children[1].stdio[3].write(JSON.stringify(packet(0, 8820)) + "\n");
   assert.equal(job.frames.samples, 8820);
@@ -272,4 +273,43 @@ test("a non-writable mounted media directory fails at startup with a storage dia
   chmodSync(directory, 0o500);
   assert.throws(() => new Separations(configuration({ SEPARATION_STORAGE_DIR: directory }),
     { resolve: async () => source }), /separation_storage_unwritable/);
+});
+
+
+test("muxing preserves the full audio tail and isolates the optional vocal track", async t => {
+  try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); }
+  catch (error) { if (error.code === "ENOENT") { t.skip("ffmpeg unavailable"); return; } throw error; }
+  const directory = mkdtempSync(join(tmpdir(), "encore-mux-test-"));
+  const { children, launch } = fakeProcesses();
+  const jobs = new Separations({}, { resolve: async () => source }, launch);
+  t.after(() => { jobs.close(); rmSync(directory, { recursive: true, force: true }); });
+  await jobs.create("room", "play", "display", "M7lc1UVf-VE", () => true);
+  const video = join(directory, "video.mp4"), music = join(directory, "music.mp4"), vocals = join(directory, "vocals.m4a");
+  execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=size=64x64:rate=10:duration=1", "-c:v", "mpeg4", video]);
+  const args = children[2].args;
+  assert.equal(args.includes("-shortest"), false);
+  // Use the production mux arguments with local video and synthetic worker PCM.
+  const inputEnd = args.indexOf(source.url) + 1;
+  const local = ["-v", "error", "-i", video, ...args.slice(inputEnd)].map(value =>
+    value === "pipe:3" ? "pipe:0" : value === "pipe:1" ? music : value === "pipe:4" ? vocals : value);
+  const pcm = Buffer.alloc(44100 * 3 * 3 * 4);
+  for (let i = 0; i < 44100 * 3; i++) {
+    pcm.writeFloatLE(.2 * Math.sin(2 * Math.PI * 220 * i / 44100), i * 12);
+    pcm.writeFloatLE(.2 * Math.sin(2 * Math.PI * 220 * i / 44100), i * 12 + 4);
+    pcm.writeFloatLE(.2 * Math.sin(2 * Math.PI * 440 * i / 44100), i * 12 + 8);
+  }
+  execFileSync("ffmpeg", local, { input: pcm });
+  for (const [file, tone, absent] of [[music, 220, 440], [vocals, 440, 220]]) {
+    const decoded = execFileSync("ffmpeg", ["-v", "error", "-i", file, "-vn", "-ac", "1", "-ar", "44100", "-f", "f32le", "pipe:1"]);
+    assert.ok(decoded.length / 4 / 44100 >= 3, "audio must continue beyond the one-second video");
+    const energy = frequency => {
+      let real = 0, imaginary = 0;
+      for (let i = 44100; i < 88200; i++) {
+        const sample = decoded.readFloatLE(i * 4), phase = 2 * Math.PI * frequency * i / 44100;
+        real += sample * Math.cos(phase); imaginary += sample * Math.sin(phase);
+      }
+      return Math.hypot(real, imaginary);
+    };
+    assert.ok(energy(tone) > 100 * energy(absent), "each output contains only its own stem");
+  }
 });

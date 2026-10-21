@@ -59,6 +59,7 @@ export interface SeparationJob {
   controller: AbortController; frames: VocalFrames; state: "loading" | "processing" | "complete" | "failed";
   error?: string; claimed: boolean; started: number; progress: number; referenceComplete: boolean;
   directory: string; file: string; writer: WriteStream; ready: boolean;
+  vocalFile: string; vocalWriter: WriteStream;
   lyrics?: TimedLyrics | null;
 }
 export type Launcher = (command: string, args: string[], options: Parameters<typeof spawn>[2]) => ChildProcess;
@@ -112,6 +113,7 @@ export class Separations {
     const job: SeparationJob = { id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
       processes: [], controller: new AbortController(), frames: new VocalFrames(), state: "loading", claimed: false,
       directory, file, writer, ready: false,
+      vocalFile: join(directory, "vocals.m4a"), vocalWriter: createWriteStream(join(directory, "vocals.m4a"), { mode: 0o600 }),
       started: Date.now(), progress: Date.now(), referenceComplete: false };
     job.output.on("error", () => {});
     // Retain the prepared instrumental for repeatable HTTP range requests.
@@ -127,6 +129,9 @@ export class Separations {
       const code = storageError(error);
       console.warn("Temporary media write failed", { code: error.code });
       this.fail(job, code);
+    });
+    job.vocalWriter.on("error", (error: NodeJS.ErrnoException) => {
+      if (this.jobs.has(job.id) && job.state !== "failed") this.fail(job, storageError(error));
     });
     writer.on("finish", () => { job.ready = job.state !== "failed"; });
     job.output.pipe(writer);
@@ -164,15 +169,22 @@ export class Separations {
     const videoOutput = nvidia
       ? ["-c:v", "h264_nvenc", "-gpu", gpu, "-preset", "p4", "-tune", "ll", "-b:v", "5M", "-g", "60", "-bf", "0"]
       : ["-c:v", "copy"];
-    const mux = process(this.config.ffmpeg || "ffmpeg", [...videoInput, ...network(source.url), "-f", "f32le", "-ar", "44100", "-ac", "2", "-i", "pipe:3",
-      "-map", "0:v:0", "-map", "1:a:0", ...videoOutput, "-c:a", "aac", "-b:a", "192k", "-t", "600", "-shortest",
-      "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]);
+    // One clock and one PCM input keep both stems aligned. Let the longer
+    // stream finish: the video may end before the separated song audio.
+    const mux = process(this.config.ffmpeg || "ffmpeg", [...videoInput, ...network(source.url), "-f", "f32le", "-ar", "44100", "-ac", "3", "-channel_layout", "3.0", "-i", "pipe:3",
+      "-filter_complex", "[1:a]asplit=2[b][v];[b]pan=stereo|c0=c0|c1=c1[backing];[v]pan=mono|c0=c2[vocals]",
+      "-map", "0:v:0", "-map", "[backing]", ...videoOutput, "-c:a", "aac", "-b:a", "192k", "-t", "600",
+      "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000", "-f", "mp4", "pipe:1",
+      "-map", "[vocals]", "-c:a", "aac", "-b:a", "128k", "-t", "600",
+      "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000", "-f", "mp4", "pipe:4"],
+      { stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"] });
     mux.stdin?.end();
     const backing = mux.stdio[3] as Writable;
     backing.on("error", () => {});
     decoder.stdout!.pipe(worker.stdin!);
     worker.stdout!.pipe(backing);
     mux.stdout!.pipe(job.output);
+    (mux.stdio[4] as Readable).pipe(job.vocalWriter);
     let pending = "";
     const reference = worker.stdio[3] as Readable;
     reference.setEncoding("utf8");
@@ -198,20 +210,21 @@ export class Separations {
     });
   }
   // Read only committed bytes, waiting at the growing EOF instead of ending the response.
-  media(job: SeparationJob, signal?: AbortSignal) {
+  media(job: SeparationJob, signal?: AbortSignal, vocals = false) {
+    const path = vocals ? job.vocalFile : job.file, writer = vocals ? job.vocalWriter : job.writer;
     const jobs = this.jobs;
     return Readable.from((async function* () {
-      const file = await open(job.file, "r");
+      const file = await open(path, "r");
       let offset = 0;
       try {
         while (!signal?.aborted && jobs.has(job.id) && job.current() && job.state !== "failed") {
-          const available = job.writer.bytesWritten - offset;
+          const available = writer.bytesWritten - offset;
           if (available > 0) {
             const bytes = Buffer.alloc(Math.min(available, 256 * 1024));
             const { bytesRead } = await file.read(bytes, 0, bytes.length, offset);
             offset += bytesRead;
             if (bytesRead) yield bytes.subarray(0, bytesRead);
-          } else if (job.writer.writableFinished) return;
+          } else if (writer.writableFinished) return;
           else await delay(100, undefined, { signal });
         }
         throw new Fault(job.error || "stale_display", 502);
@@ -237,7 +250,7 @@ export class Separations {
     job.controller.abort();
     job.processes.forEach(child => child.kill("SIGKILL"));
     job.output.destroy(new Fault(error, 502));
-    job.writer.destroy();
+    job.writer.destroy(); job.vocalWriter.destroy();
     rmSync(job.directory, { recursive: true, force: true });
   }
   stopOwned(id: string, roomId: string, deviceId: string) {
@@ -250,7 +263,7 @@ export class Separations {
     if (!job) return;
     this.jobs.delete(id); job.controller.abort();
     job.processes.forEach(child => child.kill("SIGKILL")); job.output.destroy();
-    job.writer.destroy();
+    job.writer.destroy(); job.vocalWriter.destroy();
     rmSync(job.directory, { recursive: true, force: true });
   }
   sweep() {

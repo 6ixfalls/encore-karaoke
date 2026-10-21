@@ -459,11 +459,19 @@ $("invite").addEventListener(
   "click",
   run(() => invite()),
 );
-$("remote-mic-start").addEventListener("click", run(async () => {
-  await remoteMicrophone.start();
-  $("remote-mic-stop").hidden = false;
-  $("remote-mic-start").hidden = true;
-}));
+$("remote-mic-start").addEventListener("click", async () => {
+  const start = $("remote-mic-start");
+  start.disabled = true;
+  $("remote-mic-status").textContent = "Requesting microphone access…";
+  try {
+    if (await remoteMicrophone.start()) {
+      $("remote-mic-stop").hidden = false;
+      start.hidden = true;
+    }
+  } catch (error) {
+    $("remote-mic-status").textContent = error.message;
+  } finally { start.disabled = false; }
+});
 $("remote-mic-stop").addEventListener("click", () => {
   remoteMicrophone.stop();
   $("remote-mic-stop").hidden = true;

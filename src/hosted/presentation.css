@@ -12,13 +12,6 @@
 #tv-appliance .interlude-tip-box { font-size: clamp(1rem, 1.7vw, 1.4rem); }
 #song-results[hidden] { display: none; }
 #song-results.visible { opacity: 1; pointer-events: auto; }
-#song-results .score-title-text { text-align: center; font-size: clamp(1.3rem, 4vw, 3.5rem); }
-#song-results .score-display-number { font-size: clamp(6rem, 18vw, 16rem); }
-#song-results .rank-display-text { font-size: clamp(1.5rem, 5vw, 5rem); max-width: 90vw; text-align: center; }
-#song-results .score-session-leaderboard { transform: translateY(-50%); }
-#song-results .score-lb-row { display: flex; gap: 1rem; width: 100%; align-items: center; }
-#song-results .score-lb-name { flex: 1; overflow-wrap: anywhere; font-size: clamp(.8rem, 1.5vw, 1.4rem); }
-#song-results .score-skip-hint { color: white; background: #ffffff14; border-color: #ffffff30; }
 .celebration-confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .encore-settings details { margin: 1rem 0; border-top: 1px solid #89cff040; padding: 1rem 0; }
 .encore-settings summary { cursor: pointer; font: 700 1.5rem Rajdhani, sans-serif; color: #89cff0; }
@@ -57,3 +50,5 @@
   #tv-appliance .intro-card.visible, #tv-appliance .intro-card.visible * { opacity: 1; transform: none; }
   #tv-appliance .intro-card.visible { transform: translateY(-50%); }
 }
+
+#song-results .score-skip-hint { padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }

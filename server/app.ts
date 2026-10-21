@@ -209,7 +209,7 @@ export function createApplication(store: Store, config: Configuration) {
         active.lease?.deviceId === session.id && !active.lease?.releaseRequested && rooms.available(active);
     };
     const job = await separations.create(room.id, playbackId, session.id, song.videoId, current);
-    res.status(201).json({ id: job.id, ready: separations.playable(job), media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
+    res.status(201).json({ id: job.id, ready: separations.playable(job), vocals: `/media/separation/${job.id}/vocals?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}`, media: `/media/separation/${job.id}?roomId=${room.id}&participant=${encodeURIComponent(String(req.headers["x-participant-token"]))}` });
   });
   app.get("/api/rooms/:roomId/separation/:id", (req, res) => {
     const session = participant(req);
@@ -223,28 +223,34 @@ export function createApplication(store: Store, config: Configuration) {
     separations.stopOwned(req.params.id, req.params.roomId, participant(req).id);
     res.json({ ok: true });
   });
-  app.head("/media/separation/:id", (req, res) => {
+  app.head(["/media/separation/:id", "/media/separation/:id/:track"], (req, res) => {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
-    const job = separations.get(req.params.id, roomId, session.id);
+    const job = separations.get(String(req.params.id), roomId, session.id);
     requireValue(separations.playable(job), "media_preparing", 409);
-    res.set({ "Cache-Control": "no-store", "Content-Type": "video/mp4" });
-    if (job.writer.writableFinished) res.sendFile(job.file);
+    const vocals = req.params.track === "vocals";
+    requireValue(!req.params.track || vocals, "media_not_found", 404);
+    const writer = vocals ? job.vocalWriter : job.writer, file = vocals ? job.vocalFile : job.file;
+    res.set({ "Cache-Control": "no-store", "Content-Type": vocals ? "audio/mp4" : "video/mp4" });
+    if (writer.writableFinished) res.sendFile(file);
     else res.set("Accept-Ranges", "none").end();
   });
-  app.get("/media/separation/:id", (req, res) => {
+  app.get(["/media/separation/:id", "/media/separation/:id/:track"], (req, res) => {
     const session = participant(req), roomId = String(req.query.roomId || "");
     rooms.room(roomId, session);
-    const job = separations.get(req.params.id, roomId, session.id);
+    const job = separations.get(String(req.params.id), roomId, session.id);
     requireValue(separations.playable(job), "media_preparing", 409);
     requireValue(transfers < config.maxTransfers, "transfer_limit", 503);
     job.claimed = true; transfers++;
     res.once("close", () => { transfers--; });
-    res.set({ "Cache-Control": "no-store", "Content-Type": "video/mp4" });
-    if (job.writer.writableFinished) { res.sendFile(job.file); return; }
+    const vocals = req.params.track === "vocals";
+    requireValue(!req.params.track || vocals, "media_not_found", 404);
+    const writer = vocals ? job.vocalWriter : job.writer, file = vocals ? job.vocalFile : job.file;
+    res.set({ "Cache-Control": "no-store", "Content-Type": vocals ? "audio/mp4" : "video/mp4" });
+    if (writer.writableFinished) { res.sendFile(file); return; }
     res.set({ "Accept-Ranges": "none", "X-Accel-Buffering": "no" });
     const controller = new AbortController();
-    const stream = separations.media(job, controller.signal);
+    const stream = separations.media(job, controller.signal, vocals);
     res.once("close", () => { controller.abort(); stream.destroy(); });
     stream.on("error", () => res.destroy());
     stream.pipe(res);

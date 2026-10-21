@@ -1,3 +1,5 @@
+import { requestMicrophone } from "./microphone.js";
+
 // Signaling stays on the authenticated room connection; audio travels over WebRTC.
 export class RemoteMicrophone {
   constructor({ tv, status }) {
@@ -68,21 +70,21 @@ export class RemoteMicrophone {
     const room = this.getRoom();
     if (!this.socket?.connected || !room?.lease || room.lease.retired || room.lease.releaseRequested)
       throw new Error("TV audio is not ready. Tap a TV control before enabling your microphone.");
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone access requires HTTPS and a supported browser.");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-    if (version !== this.version) { stream.getTracks().forEach((track) => track.stop()); return; }
+    const stream = await requestMicrophone();
+    if (version !== this.version) { stream.getTracks().forEach((track) => track.stop()); return false; }
     this.stream = stream;
     this.target = room.lease.deviceId;
     this.generation = room.lease.generation;
-    const { pc } = this.peer(this.target);
-    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
     try {
+      const { pc } = this.peer(this.target);
+      for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
       await pc.setLocalDescription(await pc.createOffer());
       await this.signal(this.target, { description: pc.localDescription.toJSON() });
       this.status("Connecting microphone…");
       this.timeout = setTimeout(() => {
         if (pc.connectionState !== "connected") { this.stop(); this.status("Microphone could not reach the TV. Try using the same network."); }
       }, 15000);
+      return true;
     } catch (error) { this.stop(); throw error; }
   }
   update() {

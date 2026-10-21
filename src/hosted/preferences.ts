@@ -15,6 +15,9 @@ export interface Preferences {
   lyricAlignment: string;
   lyricColor: string;
   romanization: boolean;
+  playVocals: boolean;
+  vocalVolume: number;
+  instrumentalVolume: number;
   micGain: number;
   monitoring: boolean;
   eq: number[];
@@ -33,12 +36,14 @@ export const defaults: Preferences = {
   lyricFont: "Radio Canada", lyricSize: 1, lyricGap: 1, lyricMargin: 0,
   lyricOffset: 0, lyricCase: "original", lyricAlignment: "center",
   lyricColor: "white", romanization: true,
+  playVocals: false, vocalVolume: 1, instrumentalVolume: 1,
   micGain: 1, monitoring: false, eq: [0, 0, 0, 0, 0, 0, 0],
   parametricFrequency: 1000, parametricGain: 0, parametricQ: 1,
   compressor: true, compressorThreshold: -24, echo: 0, echoTime: .25, noiseGate: -50,
 };
 const ranges: Partial<Record<keyof Preferences, [number, number]>> = {
   lyricSize: [.5, 2], lyricGap: [.5, 2], lyricMargin: [0, 150], lyricOffset: [-5000, 5000],
+  vocalVolume: [0, 1], instrumentalVolume: [0, 1],
   micGain: [0, 2], parametricFrequency: [40, 16000],
   parametricGain: [-12, 12], parametricQ: [.1, 10], compressorThreshold: [-60, 0],
   echo: [0, .7], echoTime: [.05, .8], noiseGate: [-100, -10],

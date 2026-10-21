@@ -61,12 +61,14 @@ class VocalStrip {
 }
 export class AudioMixer {
   readonly music: GainNode;
+  readonly vocalTrack: GainNode;
   readonly input: GainNode;
   readonly localInput: GainNode;
   readonly capture: GainNode;
   readonly musicCapture: GainNode;
   readonly vocalCapture: GainNode;
   private musicInput: GainNode;
+  private backing: GainNode;
   private local: VocalStrip;
   private remote: VocalStrip;
   private pitch?: AudioWorkletNode;
@@ -75,9 +77,11 @@ export class AudioMixer {
   private silenced = false;
   constructor(readonly context: AudioContext, source: AudioNode, readonly gate: GainNode) {
     this.musicInput = context.createGain(); this.music = context.createGain();
+    this.vocalTrack = context.createGain(); this.vocalTrack.gain.value = 0;
+    this.vocalTrack.connect(this.musicInput);
     this.local = new VocalStrip(context, gate); this.remote = new VocalStrip(context, gate);
     this.input = this.remote.input; this.localInput = this.local.input;
-    source.connect(this.musicInput); this.musicInput.connect(this.music); this.music.connect(gate);
+    this.backing = context.createGain(); source.connect(this.backing); this.backing.connect(this.musicInput); this.musicInput.connect(this.music); this.music.connect(gate);
     // Capture buses have the same audio-thread lease cutoff as speaker output.
     // Local monitoring is independent of processed recording and phone playback.
     this.capture = context.createGain(); this.musicCapture = context.createGain(); this.vocalCapture = context.createGain();
@@ -109,6 +113,11 @@ export class AudioMixer {
       if (seconds > 0) bus.gain.setValueAtTime(0, now + seconds);
     }
   }
-  apply(settings: Preferences): void { this.settings = settings; this.local.apply(settings, settings.monitoring); this.remote.apply(settings, true); }
+  apply(settings: Preferences): void {
+    this.settings = settings;
+    this.backing.gain.setTargetAtTime(settings.instrumentalVolume, this.context.currentTime, .01);
+    this.vocalTrack.gain.setTargetAtTime(settings.playVocals ? settings.vocalVolume : 0, this.context.currentTime, .01);
+    this.local.apply(settings, settings.monitoring); this.remote.apply(settings, true);
+  }
   silence(): void { this.setLease(0); this.local.silence(); this.remote.silence(); this.silenced = true; }
 }

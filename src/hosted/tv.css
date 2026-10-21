@@ -21,7 +21,7 @@ body.tv #message { position: fixed; top: 16px; left: 20%; right: 20%; z-index: 1
 #tv-appliance .overlay-ui { pointer-events: none; }
 #tv-appliance .stage { position: absolute; inset: 0; border: 0; border-radius: 0; padding: 0; margin: 0; background: transparent; }
 #tv-appliance #local-media { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; object-fit: contain; }
-#tv-appliance .player-ui { z-index: 12; padding-bottom: 5vh; background: transparent; }
+#tv-appliance .player-ui { z-index: 12; padding-bottom: 0; background: transparent; }
 #tv-appliance .player-ui::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to top, #000e, transparent 55%); opacity: 0; }
 #tv-appliance.has-lyrics .player-ui::before { opacity: 1; }
 #tv-appliance #lyrics-canvas { display: block; margin: 0 auto; }
