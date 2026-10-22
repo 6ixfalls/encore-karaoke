@@ -70,6 +70,7 @@ export class Presentation {
   private soundVersion = 0;
   private confetti?: HTMLCanvasElement;
   private resultTimer?: ReturnType<typeof setTimeout>;
+  private resultExitTimer?: ReturnType<typeof setTimeout>;
   private startupTimer?: ReturnType<typeof setTimeout>;
   private disposed = false;
   private wasValid = false;
@@ -246,7 +247,7 @@ export class Presentation {
       this.rank.style.color = "#ffca28"; this.rank.style.transform = "scale(1)"; this.rank.style.opacity = "1";
     }
     this.leaderboard.classList.add("hidden");
-    this.player.resultsUntil = performance.now() + 18000;
+    this.player.resultsUntil = performance.now() + 18400;
     this.resultTimer = setTimeout(() => this.skip(), 18000);
     this.hideStage();
     if (score) {
@@ -255,17 +256,17 @@ export class Presentation {
       const url = `/assets/audio/fanfare${fanfare === 1 ? "" : `-${fanfare}`}.mid`;
       const started = this.resultStarted;
       const audio = new Promise<void>(resolve => setTimeout(resolve, 1000)).then(() => {
-        if (this.resultStarted !== started || this.results.hidden) return;
+        if (this.resultStarted !== started || this.results.hidden || this.resultExitTimer !== undefined) return;
         return this.preferences.fanfare ? this.playSound(url) : new Promise<void>(resolve => setTimeout(resolve, 4000));
       });
       void audio.then(() => {
-        if (this.resultStarted !== started || this.results.hidden || !this.preferences.narration) return;
+        if (this.resultStarted !== started || this.results.hidden || this.resultExitTimer !== undefined || !this.preferences.narration) return;
         return this.playSound(`/assets/audio/scores/${s >= 100 ? 100 : s >= 70 ? 70 : s >= 50 ? 50 : s >= 20 ? 20 : 0}.wav`);
       });
     }
   }
   private updateResult(): void {
-    if (this.results.hidden || !this.resultSong) return;
+    if (this.results.hidden || this.resultExitTimer !== undefined || !this.resultSong) return;
     if (!this.preferences.celebrations) { this.skip(); return; }
     const elapsed = performance.now() - this.resultStarted;
     if (this.resultScore) {
@@ -312,13 +313,26 @@ export class Presentation {
     this.countdown.classList.remove("visible"); this.interlude.classList.remove("visible");
   }
   skip(resume = true): void {
+    if (resume && this.resultExitTimer !== undefined) return;
     const hadResult = !this.results.hidden;
-    clearTimeout(this.startupTimer); clearTimeout(this.resultTimer);
+    clearTimeout(this.startupTimer); clearTimeout(this.resultTimer); clearTimeout(this.resultExitTimer);
+    this.resultExitTimer = undefined;
     this.startupLayer?.remove(); this.startupLayer = undefined;
-    this.stopSound(); this.results.hidden = true; this.results.classList.remove("visible");
+    this.stopSound(); this.results.classList.remove("visible");
     this.confetti?.remove(); this.confetti = undefined;
+    if (resume && hadResult && this.player.valid() && !this.disposed) {
+      // Match upstream: fade for 400ms before allowing the next track to load.
+      this.player.resultsUntil = performance.now() + 400;
+      this.resultExitTimer = setTimeout(() => {
+        this.resultExitTimer = undefined;
+        this.results.hidden = true;
+        this.player.resultsUntil = 0;
+        if (this.player.valid()) this.resume();
+      }, 400);
+      return;
+    }
+    this.results.hidden = true;
     this.player.resultsUntil = 0;
-    if (resume && hadResult && this.player.valid()) this.resume();
   }
   dispose(): void { this.disposed = true; this.skip(false); this.hideStage(); document.removeEventListener("keydown", this.onKey); }
 }

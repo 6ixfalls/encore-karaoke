@@ -138,6 +138,14 @@ test("received phone audio attaches to the display scorer with its participant l
   globalThis.RTCPeerConnection = class { connectionState = "connected"; close() {} };
   const attached = [], connected = [];
   const source = { connect: target => connected.push(target), disconnect() {} }, stream = {};
+  let played = 0, paused = 0;
+  const receivers = [];
+  document.createElement = tag => {
+    assert.equal(tag, "audio");
+    const audio = { play() { played++; return Promise.resolve(); }, pause() { paused++; } };
+    receivers.push(audio);
+    return audio;
+  };
   const context = { createMediaStreamSource: received => { assert.equal(received, stream); return source; } };
   const mic = new RemoteMicrophone({ tv: true, status() {} });
   mic.getRoom = () => ({ participants: [{ id: "phone", nickname: "Alex" }] });
@@ -148,4 +156,14 @@ test("received phone audio attaches to the display scorer with its participant l
   pc.ontrack({ track: { kind: "audio", addEventListener() {} }, streams: [stream] });
   assert.equal(connected[0], mic.player.gate);
   assert.deepEqual(attached[0], ["phone", source, context, "Alex"]);
+  assert.equal(receivers[0].srcObject, stream);
+  assert.equal(receivers[0].muted, true, "receiver cannot bypass the mixer or lease gate");
+  assert.equal(played, 1);
+  pc.ontrack({ track: { kind: "audio", addEventListener() {} }, streams: [stream] });
+  assert.equal(receivers[0].srcObject, null, "replacement releases the previous renderer");
+  assert.equal(paused, 1);
+  assert.equal(played, 2);
+  mic.closePeer("phone");
+  assert.equal(receivers[1].srcObject, null);
+  assert.equal(paused, 2);
 });

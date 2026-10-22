@@ -7,6 +7,38 @@ import { Romanizer } from "../../src/hosted/romanizer.ts";
 import { PerformanceTools } from "../../src/hosted/performance.js";
 
 const cues = [{ time: 10, end: 15, text: "One" }, { time: 30, end: 35, text: "Two" }];
+test("results fade for 400ms before resuming and teardown cancels the pending exit", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const classes = new Set(["visible"]);
+  let resumed = 0, valid = true;
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    player: { valid: () => valid },
+    results: { hidden: false, classList: { remove: name => classes.delete(name) } },
+    stopSound() {}, resume() { resumed++; },
+  });
+  presentation.skip();
+  assert.equal(classes.has("visible"), false);
+  assert.equal(presentation.results.hidden, false, "keep the overlay rendered during its fade");
+  assert.ok(presentation.player.resultsUntil > performance.now());
+  t.mock.timers.tick(200);
+  presentation.skip(); // Repeated Enter must not restart the fade.
+  t.mock.timers.tick(199);
+  assert.equal(resumed, 0);
+  t.mock.timers.tick(1);
+  assert.equal(presentation.results.hidden, true);
+  assert.equal(resumed, 1);
+  assert.equal(presentation.player.resultsUntil, 0);
+  presentation.results.hidden = false;
+  presentation.skip();
+  presentation.skip(false);
+  t.mock.timers.tick(400);
+  assert.equal(resumed, 1, "teardown cancels the pending resume");
+  presentation.results.hidden = false;
+  presentation.skip();
+  valid = false;
+  t.mock.timers.tick(400);
+  assert.equal(resumed, 1, "an expired lease cannot resume playback");
+});
 test("song results show missing-score guidance and animate a measured zero score", t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const element = () => ({ hidden: true, textContent: "", style: {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
@@ -26,6 +58,26 @@ test("song results show missing-score guidance and animate a measured zero score
   assert.equal(presentation.scoreNumber.textContent, "0");
   assert.equal(presentation.scoreStatus.hidden, true);
   assert.equal(presentation.rank.textContent, "");
+});
+test("skipping results cancels delayed fanfare and narration during the fade", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const element = () => ({ hidden: true, textContent: "", style: {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
+  const sounds = [];
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    preferences: { celebrations: true, fanfare: true, narration: true }, player: { valid: () => true },
+    results: element(), scoreTitle: element(), scoreNumber: element(), scoreStatus: element(),
+    rank: element(), leaderboard: element(), inputResults: element(), hideStage() {},
+    stopSound() {}, playSound(url) { sounds.push(url); return Promise.resolve(); }, resume() {},
+  });
+  presentation.finish({ playbackId: "song", title: "Song" }, { value: 80 });
+  t.mock.timers.tick(800);
+  presentation.skip();
+  t.mock.timers.tick(200);
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(presentation.results.hidden, false, "the delayed audio fires while the overlay is fading");
+  assert.deepEqual(sounds, [], "neither fanfare nor narration can restart after skip");
+  t.mock.timers.tick(200);
+  assert.equal(presentation.results.hidden, true);
 });
 test("vocal countdowns and interludes follow cue gaps and rewind without timers", () => {
   assert.deepEqual(gapPresentation([], 0), { countdown: null, interlude: false });

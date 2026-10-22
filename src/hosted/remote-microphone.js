@@ -43,12 +43,26 @@ export class RemoteMicrophone {
       if (this.peers.get(id) !== entry || !this.tv || track.kind !== "audio" || !this.player.valid()) return;
       this.player.performanceTools?.detachRemoteMicrophone(id);
       entry.source?.disconnect();
+      this.releaseReceiver(entry);
       this.player.mixer?.removeMicrophone?.(id);
       const stream = streams[0] || new MediaStream([track]);
+      // Chromium needs a media element consuming remote WebRTC audio before
+      // MediaStreamAudioSourceNode receives samples (crbug.com/40094084).
+      // Keep it muted: the mixer and its lease gate own all speaker output.
+      const audio = entry.audio = document.createElement("audio");
+      entry.audio.autoplay = true;
+      entry.audio.muted = true;
+      entry.audio.srcObject = stream;
       entry.source = this.player.context.createMediaStreamSource(stream);
       entry.source.connect(this.player.mixer?.microphoneInput(id) || this.player.gate);
       const nickname = this.getRoom?.()?.participants?.find(participant => participant.id === id)?.nickname;
       this.player.performanceTools?.attachRemoteMicrophone(id, entry.source, this.player.context, nickname);
+      entry.audio.play().catch(() => {
+        if (this.peers.get(id) === entry && entry.audio === audio) {
+          this.closePeer(id);
+          this.status("Phone audio could not start. Tap a TV control, then reconnect the phone microphone.");
+        }
+      });
       this.updateConnections();
       track.addEventListener?.("ended", () => { if (this.peers.get(id) === entry) this.closePeer(id); }, { once: true });
     };
@@ -126,9 +140,16 @@ export class RemoteMicrophone {
     this.peers.delete(id);
     this.player?.performanceTools?.detachRemoteMicrophone(id);
     entry.source?.disconnect();
+    this.releaseReceiver(entry);
     this.player?.mixer?.removeMicrophone?.(id);
     entry.pc.close();
     this.updateConnections();
+  }
+  releaseReceiver(entry) {
+    if (!entry.audio) return;
+    entry.audio.pause();
+    entry.audio.srcObject = null;
+    entry.audio = null;
   }
   stop() {
     this.version++;
