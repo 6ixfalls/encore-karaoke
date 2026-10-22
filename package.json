@@ -4,7 +4,7 @@
   "description": "Stateless karaoke rooms with one main browser screen and code/QR phone controllers.",
   "type": "module",
   "scripts": {
-    "build": "npm run build:server && npm run test:web-types && node build-server.mjs",
+    "build": "npm run build:server && tsc -p tsconfig.tools.json && npm run test:web-types && node --import tsx build-server.ts",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "start:server": "npm start",
@@ -14,9 +14,11 @@
     "test": "npm run lint && npm run test:server",
     "test:server": "npm run build:server && node --import tsx --test tests/server/*.test.mjs",
     "test:container": "docker buildx build --platform linux/amd64 --output type=cacheonly -f deploy/Dockerfile .",
-    "lint": "eslint server shared src/hosted src/platform tests/server build-server.mjs eslint.config.js",
-    "test:types": "tsc -p tsconfig.server.json --noEmit && npm run test:web-types",
-    "test:web-types": "tsc -p tsconfig.web.json"
+    "lint": "eslint server shared src/hosted src/platform tests/server build-server.ts scripts eslint.config.js",
+    "test:types": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.tools.json && npm run test:web-types",
+    "test:web-types": "tsc -p tsconfig.web.json",
+    "format": "node --import tsx scripts/format.ts",
+    "format:check": "node --import tsx scripts/format.ts --check"
   },
   "repository": {
     "type": "git",

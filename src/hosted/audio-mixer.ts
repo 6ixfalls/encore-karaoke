@@ -37,13 +37,14 @@ class VocalStrip {
     this.output.connect(this.monitor); this.monitor.connect(gate);
   }
   initialize(): void {
+    if (this.noise) return;
     this.noise = new AudioWorkletNode(this.context, "noise-gate-processor", { outputChannelCount: [2] });
     this.input.disconnect(); this.input.connect(this.noise); this.noise.connect(this.eq[0]);
   }
-  apply(settings: Preferences, monitoring: boolean): void {
+  apply(settings: Preferences, monitoring: boolean, volume = 1): void {
     const time = this.context.currentTime;
     const set = (parameter: AudioParam, value: number) => parameter.setTargetAtTime(value, time, .01);
-    set(this.gain.gain, settings.micGain); set(this.monitor.gain, monitoring ? 1 : 0);
+    set(this.output.gain, settings.micGain * volume); set(this.monitor.gain, monitoring ? 1 : 0);
     this.eq.forEach((filter, i) => set(filter.gain, settings.eq[i]));
     set(this.parametric.frequency, settings.parametricFrequency);
     set(this.parametric.gain, settings.parametricGain); set(this.parametric.Q, settings.parametricQ);
@@ -51,6 +52,10 @@ class VocalStrip {
     set(this.compressor.ratio, settings.compressor ? 4 : 1);
     set(this.echo.delayTime, settings.echoTime); set(this.wet.gain, settings.echo); set(this.feedback.gain, .3);
     this.noise?.parameters.get("threshold")?.setValueAtTime(10 ** (settings.noiseGate / 20), time);
+  }
+  dispose(): void {
+    for (const node of [this.input, this.output, this.monitor, ...this.eq, this.parametric,
+      this.compressor, this.gain, this.echo, this.feedback, this.wet, this.noise]) node?.disconnect();
   }
   silence(): void {
     this.feedback.gain.cancelScheduledValues(this.context.currentTime);
@@ -71,6 +76,9 @@ export class AudioMixer {
   private backing: GainNode;
   private local: VocalStrip;
   private remote: VocalStrip;
+  private microphones = new Map<string, VocalStrip>();
+  private microphoneSettings = new Map<string, { volume: number; loopback: boolean }>();
+  private initialized = false;
   private pitch?: AudioWorkletNode;
   private ready?: Promise<void>;
   private settings?: Preferences;
@@ -95,17 +103,48 @@ export class AudioMixer {
       this.pitch = new AudioWorkletNode(this.context, "pitch-shifter-processor", { outputChannelCount: [2] });
       this.musicInput.disconnect(); this.musicInput.connect(this.pitch); this.pitch.connect(this.music);
       this.local.initialize(); this.remote.initialize();
+      this.initialized = true;
+      for (const strip of this.microphones.values()) strip.initialize();
       if (this.settings) this.apply(this.settings);
     }).catch(error => { this.ready = undefined; throw error; });
     return this.ready;
+  }
+  microphoneInput(id: string): GainNode {
+    if (id === "local") return this.localInput;
+    let strip = this.microphones.get(id);
+    if (!strip) {
+      strip = new VocalStrip(this.context, this.gate);
+      this.microphones.set(id, strip);
+      strip.output.connect(this.capture); strip.output.connect(this.vocalCapture);
+      if (this.initialized) strip.initialize();
+      if (this.settings) this.applyMicrophone(id, strip);
+    }
+    return strip.input;
+  }
+  removeMicrophone(id: string): void {
+    this.microphones.get(id)?.dispose(); this.microphones.delete(id);
+  }
+  getMicrophoneSettings(id: string): { volume: number; loopback: boolean } {
+    return this.microphoneSettings.get(id) || { volume: 1, loopback: id === "local" ? !!this.settings?.monitoring : true };
+  }
+  setMicrophoneSettings(id: string, value: { volume: number; loopback: boolean }): void {
+    if (!Number.isFinite(value.volume) || value.volume < 0 || value.volume > 2 || typeof value.loopback !== "boolean") return;
+    this.microphoneSettings.set(id, { ...value });
+    const strip = id === "local" ? this.local : this.microphones.get(id);
+    if (strip && this.settings) this.applyMicrophone(id, strip);
+  }
+  private applyMicrophone(id: string, strip: VocalStrip): void {
+    const channel = this.getMicrophoneSettings(id);
+    if (this.settings) strip.apply(this.settings, channel.loopback, channel.volume);
+    if (this.silenced) strip.silence();
   }
   setTranspose(semitones: number): void {
     this.pitch?.parameters.get("pitchFactor")?.setValueAtTime(2 ** (semitones / 12), this.context.currentTime);
   }
   setLease(seconds: number): void {
     if (seconds > 0 && this.silenced) {
-      if (this.settings) this.apply(this.settings);
       this.silenced = false;
+      if (this.settings) this.apply(this.settings);
     }
     const now = this.context.currentTime;
     for (const bus of [this.capture, this.musicCapture, this.vocalCapture]) {
@@ -117,7 +156,10 @@ export class AudioMixer {
     this.settings = settings;
     this.backing.gain.setTargetAtTime(settings.instrumentalVolume, this.context.currentTime, .01);
     this.vocalTrack.gain.setTargetAtTime(settings.playVocals ? settings.vocalVolume : 0, this.context.currentTime, .01);
-    this.local.apply(settings, settings.monitoring); this.remote.apply(settings, true);
+    this.applyMicrophone("local", this.local); this.remote.apply(settings, true);
+    for (const [id, strip] of this.microphones) this.applyMicrophone(id, strip);
   }
-  silence(): void { this.setLease(0); this.local.silence(); this.remote.silence(); this.silenced = true; }
+  silence(): void { this.setLease(0); this.local.silence(); this.remote.silence();
+    for (const strip of this.microphones.values()) strip.silence();
+    this.silenced = true; }
 }

@@ -87,9 +87,11 @@ export class Separations {
     }
   }
   private logStorageError(error: NodeJS.ErrnoException) {
-    console.error("Temporary media storage unavailable", { path: this.config.separationStorageDir || tmpdir(),
+    console.error("Temporary media storage unavailable", {
+      path: this.config.separationStorageDir || tmpdir(),
       code: error.code, uid: process.getuid?.(), gid: process.getgid?.(),
-      hint: "Mount a writable disk-backed emptyDir at SEPARATION_STORAGE_DIR; set pod fsGroup to the container group (1000)." });
+      hint: "Mount a writable disk-backed emptyDir at SEPARATION_STORAGE_DIR; set pod fsGroup to the container group (1000)."
+    });
   }
   async create(roomId: string, playbackId: string, deviceId: string, videoId: string, current: () => boolean) {
     for (const job of this.jobs.values()) {
@@ -110,12 +112,14 @@ export class Separations {
       if (directory) rmSync(directory, { recursive: true, force: true });
       throw new Fault(storageError(error as NodeJS.ErrnoException), 502);
     }
-    const job: SeparationJob = { id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
+    const job: SeparationJob = {
+      id: randomUUID(), roomId, playbackId, deviceId, current, output: new PassThrough({ highWaterMark: 256 * 1024 }),
       processes: [], controller: new AbortController(), frames: new VocalFrames(), state: "loading", claimed: false,
       directory, file, writer, ready: false,
       vocalFile: join(directory, "vocals.m4a"), vocalWriter: createWriteStream(join(directory, "vocals.m4a"), { mode: 0o600 }),
-      started: Date.now(), progress: Date.now(), referenceComplete: false };
-    job.output.on("error", () => {});
+      started: Date.now(), progress: Date.now(), referenceComplete: false
+    };
+    job.output.on("error", () => { });
     // Retain the prepared instrumental for repeatable HTTP range requests.
     // Pausing or seeking no longer tears down the separation process.
     let bytes = 0;
@@ -152,7 +156,7 @@ export class Separations {
       const child = this.launch(command, args, { stdio: ["pipe", "pipe", "pipe", "pipe"], ...extra });
       job.processes.push(child);
       child.on("error", () => this.fail(job, "separation_dependency_unavailable"));
-      child.stdin?.on("error", () => {});
+      child.stdin?.on("error", () => { });
       child.stderr?.resume(); // Never expose signed URLs or subprocess diagnostics to clients.
       child.on("close", code => { if (code !== 0 && this.jobs.has(job.id)) this.fail(job, "separation_process_failed"); });
       return child;
@@ -180,7 +184,7 @@ export class Separations {
       { stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"] });
     mux.stdin?.end();
     const backing = mux.stdio[3] as Writable;
-    backing.on("error", () => {});
+    backing.on("error", () => { });
     decoder.stdout!.pipe(worker.stdin!);
     worker.stdout!.pipe(backing);
     mux.stdout!.pipe(job.output);
@@ -213,7 +217,7 @@ export class Separations {
   media(job: SeparationJob, signal?: AbortSignal, vocals = false) {
     const path = vocals ? job.vocalFile : job.file, writer = vocals ? job.vocalWriter : job.writer;
     const jobs = this.jobs;
-    return Readable.from((async function* () {
+    return Readable.from((async function*() {
       const file = await open(path, "r");
       let offset = 0;
       try {

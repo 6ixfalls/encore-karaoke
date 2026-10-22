@@ -8,14 +8,14 @@ export function configuration(env: NodeJS.ProcessEnv = process.env) {
   );
   requireValue(
     publicUrl.pathname === "/" &&
-      !publicUrl.search &&
-      !publicUrl.hash &&
-      !publicUrl.username &&
-      !publicUrl.password,
+    !publicUrl.search &&
+    !publicUrl.hash &&
+    !publicUrl.username &&
+    !publicUrl.password,
   );
   requireValue(
     publicUrl.protocol === "https:" ||
-      (local && publicUrl.protocol === "http:"),
+    (local && publicUrl.protocol === "http:"),
     "https_required",
   );
   const separationDevice = env.SEPARATION_DEVICE || "cpu";

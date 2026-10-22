@@ -9,10 +9,11 @@ import { youtubeId } from "./youtube.js";
 import { HostedLyrics } from "./lyrics.js";
 import { Presentation } from "./presentation.js";
 import { AudioMixer } from "./audio-mixer.js";
-import { loadPreferences } from "./preferences.js";
+import { loadPreferences, savePreferences } from "./preferences.js";
 import { mountSettings } from "./settings.js";
 import { Romanizer } from "./romanizer.js";
-import { mountInputStatus } from "./input-status.js";
+import { mountInputStatus, mountMicrophoneMaster } from "./input-status.js";
+import { mountMessage } from "./message.js";
 
 const $ = (id) => document.getElementById(id);
 const services = new BrowserServices();
@@ -50,9 +51,7 @@ let invitation = new URLSearchParams(location.hash.slice(1)).get("invite");
 if (location.hash)
   history.replaceState(null, "", location.pathname + location.search);
 if (invitation) $("join-code").value = invitation;
-const tell = (value) => {
-  $("message").textContent = value || "";
-};
+const tell = mountMessage($("message"));
 const showError = (error) =>
   tell(
     `${error.message === "separation_storage_unwritable" ? "Media storage is not writable. Mount /var/cache/encore-media as a writable Kubernetes volume and set pod fsGroup: 1000." : error.message}${error.retryAfterMs ? ` — try again in ${Math.ceil(error.retryAfterMs / 1000)} seconds.` : ""}`,
@@ -91,9 +90,9 @@ function setLiveScoring(enabled) {
 setLiveScoring(tv);
 const performanceTools = new PerformanceTools({
   staff,
-  inputs: mountInputStatus($("microphone-inputs")),
+  inputs: mountInputStatus($("microphone-inputs"), () => player.mixer),
   status: (text) => { $("performance-status").textContent = text; },
-  score: (text) => { $("score").textContent = text; },
+  score: () => {},
   recording: (blob, title) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -142,7 +141,11 @@ const player = new BrowserPlayer(services, {
 function mountPresentation() {
   presentation = new Presentation($("tv-appliance"), preferences, player, () => player.update(room).catch(showError));
   presentation.startup();
+  const refreshMaster = mountMicrophoneMaster($("microphone-master"), preferences, () => {
+    savePreferences(preferences); player.mixer?.apply(preferences);
+  });
   mountSettings($("display-controls"), preferences, async () => {
+    refreshMaster();
     lyricRenderer?.configure(preferences);
     if (player.mixer) { await player.mixer.initialize(); player.mixer.apply(preferences); }
   }, showError);
@@ -294,20 +297,6 @@ function render(snapshot) {
     row.append(label(`${item.title} · ${item.artist} — ${item.nickname}`));
     if (isHost() || item.owner === session.id)
       row.append(button("Remove", () => command("remove", { id: item.id })));
-    return row;
-  }));
-  $("song-scores").replaceChildren(...(room.scores || []).slice().reverse().map(score => {
-    const row = document.createElement("li");
-    row.textContent = `${score.title} · ${score.nickname}: ${score.inputs ? "Group " : ""}${score.value} / 100`;
-    if (score.inputs?.length) {
-      const inputs = document.createElement("ul");
-      inputs.append(...score.inputs.map(input => {
-        const entry = document.createElement("li");
-        entry.textContent = `${input.label}: ${input.value === null ? input.reason || "Score unavailable" : `${input.value} / 100`}`;
-        return entry;
-      }));
-      row.append(inputs);
-    }
     return row;
   }));
   player.update(room).catch(showError);

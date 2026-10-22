@@ -139,7 +139,7 @@ export class Rooms {
       const grant = this.store.get("invites", digest(text(invitation, 128)));
       requireValue(
         grant &&
-          grant.expires > this.clock(),
+        grant.expires > this.clock(),
         "expired_invitation",
         403,
       );
@@ -253,7 +253,7 @@ export class Rooms {
     if (!this.host(session))
       requireValue(
         room.queue.filter((q) => q.owner === session.id).length <
-          room.policy.guestCap,
+        room.policy.guestCap,
         "reservation_limit",
         409,
       );
@@ -300,7 +300,7 @@ export class Rooms {
     }
     requireValue(
       host ||
-        (room.policy.guestControl && ["play", "pause", "skip", "volume", "tempo", "transpose", "seek"].includes(type)),
+      (room.policy.guestControl && ["play", "pause", "skip", "volume", "tempo", "transpose", "seek"].includes(type)),
       "forbidden",
       403,
     );
@@ -308,9 +308,9 @@ export class Rooms {
       case "reorder": {
         requireValue(
           Array.isArray(p.ids) &&
-            p.ids.length === room.queue.length &&
-            new Set(p.ids).size === room.queue.length &&
-            p.ids.every((id) => room.queue.some((q) => q.id === id)),
+          p.ids.length === room.queue.length &&
+          new Set(p.ids).size === room.queue.length &&
+          p.ids.every((id) => room.queue.some((q) => q.id === id)),
         );
         room.queue = p.ids.map((id) => room.queue.find((q) => q.id === id)!);
         break;
@@ -334,8 +334,10 @@ export class Rooms {
         break;
       case "seek":
         requireValue(room.current, "queue_empty", 409);
-        room.current.seek = { id: randomUUID(), position: number(p.position, 0,
-          this.store.get("songs", room.current.songId)?.duration || 600) };
+        room.current.seek = {
+          id: randomUUID(), position: number(p.position, 0,
+            this.store.get("songs", room.current.songId)?.duration || 600)
+        };
         room.position = room.current.seek.position;
         break;
       case "volume":
@@ -369,8 +371,8 @@ export class Rooms {
           .find((s) => s.id === p.deviceId);
         requireValue(
           target &&
-            target.role === "guest" &&
-            room.members[target.id],
+          target.role === "guest" &&
+          room.members[target.id],
           "invalid_participant",
         );
         target.revoked = true;
@@ -402,11 +404,11 @@ export class Rooms {
     const item = room.queue[0];
     room.current = item
       ? {
-          ...item,
-          reservationId: item.id,
-          playbackId: randomUUID(),
-          confirmed: false,
-        }
+        ...item,
+        reservationId: item.id,
+        playbackId: randomUUID(),
+        confirmed: false,
+      }
       : null;
     room.position = 0;
     room.observed = item ? "loading" : "idle";
@@ -460,8 +462,8 @@ export class Rooms {
       const room = this.room(roomId, session);
       requireValue(
         this.available(room) &&
-          room.lease.deviceId === session.id &&
-          room.lease.generation === generation,
+        room.lease.deviceId === session.id &&
+        room.lease.generation === generation,
         "stale_display",
         409,
       );
@@ -496,8 +498,8 @@ export class Rooms {
       const room = this.room(roomId, session);
       requireValue(
         this.available(room) &&
-          room.lease.deviceId === session.id &&
-          room.lease.generation === message.leaseGeneration,
+        room.lease.deviceId === session.id &&
+        room.lease.generation === message.leaseGeneration,
         "stale_display",
         409,
       );
@@ -558,10 +560,12 @@ export class Rooms {
         if (message.score) room.scores = [...(room.scores || []), {
           playbackId: room.current.playbackId, title: room.current.title,
           nickname: room.current.nickname, value: message.score.value, mode: message.score.mode,
-          ...(message.score.inputs ? { inputs: message.score.inputs.map(input => ({
-            id: input.id, label: input.label, source: input.source, value: input.value,
-            samples: input.samples, mode: input.mode, ...(input.reason ? { reason: input.reason } : {}),
-          })), aggregation: "mean" as const } : {}),
+          ...(message.score.inputs ? {
+            inputs: message.score.inputs.map(input => ({
+              id: input.id, label: input.label, source: input.source, value: input.value,
+              samples: input.samples, mode: input.mode, ...(input.reason ? { reason: input.reason } : {}),
+            })), aggregation: "mean" as const
+          } : {}),
         }].slice(-20);
         this.next(room);
       }

@@ -25,6 +25,52 @@ const reaches = (start, goal, visited = new Set()) => {
   visited.add(start);
   return [...start.destinations].some(node => reaches(node, goal, visited));
 };
+test("microphone channels have independent levels and loopback, with a master that leaves music and dry inputs alone", async t => {
+  const original = globalThis.AudioWorkletNode;
+  globalThis.AudioWorkletNode = class extends Node { parameters = new Map([["pitchFactor", new Parameter()], ["threshold", new Parameter()]]); };
+  t.after(() => { if (original) globalThis.AudioWorkletNode = original; else delete globalThis.AudioWorkletNode; });
+  const context = { currentTime: 10, audioWorklet: { addModule: async () => {} },
+    createGain: () => new Node(),
+    createBiquadFilter: () => Object.assign(new Node(), { frequency: new Parameter(), Q: new Parameter() }),
+    createDynamicsCompressor: () => Object.assign(new Node(), Object.fromEntries(["threshold", "ratio", "attack", "release", "knee"].map(k => [k, new Parameter()]))),
+    createDelay: () => Object.assign(new Node(), { delayTime: new Parameter() }),
+  };
+  const source = new Node(), gate = new Node(), mixer = new AudioMixer(context, source, gate);
+  mixer.apply({ ...defaults, micGain: .5 }); await mixer.initialize(); mixer.setLease(8);
+  const first = mixer.microphoneInput("first"), second = mixer.microphoneInput("second");
+  const level = (node, goal, seen = new Set()) => {
+    if (seen.has(node)) return 0;
+    if (node === goal) return node.gain?.value ?? 1;
+    const next = new Set(seen); next.add(node);
+    const gain = "frequency" in node ? 1 : node.gain?.value ?? 1;
+    return gain * [...node.destinations].reduce((sum, dest) => sum + level(dest, goal, next), 0);
+  };
+  mixer.setMicrophoneSettings("first", { volume: .4, loopback: false });
+  mixer.setMicrophoneSettings("second", { volume: 1.2, loopback: true });
+  assert.equal(level(first, gate), 0);
+  assert.equal(level(first, mixer.capture), .2);
+  assert.equal(level(second, gate), .6);
+  assert.equal(level(second, mixer.capture), .6);
+  mixer.setMicrophoneSettings("local", { volume: .8, loopback: true });
+  assert.equal(level(mixer.localInput, gate), .4);
+  assert.equal(first.gain.value, 1); // Dry source/scoring branch stays untouched.
+  assert.equal(level(source, gate), 1);
+  mixer.apply({ ...defaults, micGain: 0 });
+  assert.equal(level(second, gate), 0);
+  assert.equal(level(first, mixer.capture), 0);
+  assert.equal(level(source, gate), 1);
+  mixer.apply(defaults);
+  assert.equal(level(second, gate), 1.2);
+  mixer.removeMicrophone("second");
+  assert.equal(reaches(second, gate), false);
+  assert.equal(reaches(second, mixer.capture), false);
+  const reconnected = mixer.microphoneInput("second");
+  assert.equal(level(reconnected, gate), 1.2);
+  mixer.setMicrophoneSettings("second", { volume: -1, loopback: true });
+  assert.equal(level(reconnected, gate), 1.2);
+  mixer.setLease(0);
+  assert.equal(level(first, mixer.capture), 0);
+});
 test("vocal monitoring, processed capture and phone output have separate routes behind the lease gate", async t => {
   const original = globalThis.AudioWorkletNode;
   globalThis.AudioWorkletNode = class extends Node { parameters = new Map([["pitchFactor", new Parameter()], ["threshold", new Parameter()]]); };

@@ -8,30 +8,64 @@ export function inputStatusText(input) {
   return input.rms >= .003 ? "Audio received · no clear pitch" : "Silent / no audio received";
 }
 
-export function mountInputStatus(container) {
+export function mountInputStatus(container, getMixer = () => null) {
   const rows = new Map();
   return inputs => {
     const present = new Set(inputs.map(input => input.id));
     for (const [id, row] of rows) if (!present.has(id)) { row.element.remove(); rows.delete(id); }
-    container.querySelector(".mic-input-empty").hidden = inputs.length > 0;
     for (const input of inputs) {
       let row = rows.get(input.id);
       if (!row) {
         const element = document.createElement("div"); element.className = "mic-input-row";
-        const label = document.createElement("strong"), state = document.createElement("span"), score = document.createElement("span");
+        const label = document.createElement("strong");
         const meter = document.createElement("meter"); meter.min = 0; meter.max = 1;
-        element.append(label, meter, state, score); container.append(element);
-        row = { element, label, meter, state, score }; rows.set(input.id, row);
+        const volumeLabel = document.createElement("label"); volumeLabel.textContent = "Volume";
+        const volume = document.createElement("input"); volume.type = "range";
+        volume.min = "0"; volume.max = "2"; volume.step = ".05";
+        volume.setAttribute("aria-label", `${input.label} volume`);
+        const output = document.createElement("output");
+        volumeLabel.append(volume, output);
+        const loopbackLabel = document.createElement("label");
+        const loopback = document.createElement("input"); loopback.type = "checkbox";
+        loopback.setAttribute("aria-label", `${input.label} loopback to display`);
+        loopbackLabel.append(loopback, document.createTextNode("Loopback to display"));
+        const changed = () => getMixer()?.setMicrophoneSettings(input.id, {
+          volume: Number(volume.value), loopback: loopback.checked,
+        });
+        volume.addEventListener("input", changed); loopback.addEventListener("change", changed);
+        element.append(label, meter, volumeLabel, loopbackLabel); container.append(element);
+        row = { element, label, meter, volume, output, loopback }; rows.set(input.id, row);
       }
       row.element.style.setProperty("--input-color", input.color);
       row.label.textContent = input.label;
       row.meter.setAttribute("aria-label", `${input.label} audio received at display`);
       row.meter.value = Math.min(1, input.rms * 4);
-      const state = inputStatusText(input);
-      if (row.state.textContent !== state) row.state.textContent = state;
-      const value = input.result?.value;
-      const score = value == null ? "Collecting score" : `${value} / 100${input.provisional ? " · provisional" : ""}`;
-      if (row.score.textContent !== score) row.score.textContent = score;
+      const settings = getMixer()?.getMicrophoneSettings(input.id);
+      row.volume.disabled = row.loopback.disabled = !settings;
+      if (settings) {
+        if (document.activeElement !== row.volume) row.volume.value = String(settings.volume);
+        row.output.textContent = `${Math.round(Number(row.volume.value) * 100)}%`;
+        row.loopback.checked = settings.loopback;
+      }
+
     }
   };
+}
+
+export function mountMicrophoneMaster(container, preferences, apply) {
+  const label = document.createElement("label"); label.textContent = "Master microphone volume";
+  const volume = document.createElement("input"); volume.type = "range";
+  volume.min = "0"; volume.max = "2"; volume.step = ".05";
+  const output = document.createElement("output");
+  const refresh = () => {
+    volume.value = String(preferences.micGain);
+    output.textContent = `${Math.round(preferences.micGain * 100)}%`;
+  };
+  refresh();
+  volume.addEventListener("input", () => { preferences.micGain = Number(volume.value); refresh(); apply(); });
+  label.append(volume, output);
+  const hint = document.createElement("p"); hint.className = "muted";
+  hint.textContent = "Loopback plays a microphone through the display speakers. Turning it off keeps scoring and recording active. Each microphone volume is multiplied by the master volume.";
+  container.append(label, hint);
+  return refresh;
 }

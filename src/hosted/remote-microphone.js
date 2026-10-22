@@ -43,9 +43,10 @@ export class RemoteMicrophone {
       if (this.peers.get(id) !== entry || !this.tv || track.kind !== "audio" || !this.player.valid()) return;
       this.player.performanceTools?.detachRemoteMicrophone(id);
       entry.source?.disconnect();
+      this.player.mixer?.removeMicrophone?.(id);
       const stream = streams[0] || new MediaStream([track]);
       entry.source = this.player.context.createMediaStreamSource(stream);
-      entry.source.connect(this.player.mixer?.input || this.player.gate);
+      entry.source.connect(this.player.mixer?.microphoneInput(id) || this.player.gate);
       const nickname = this.getRoom?.()?.participants?.find(participant => participant.id === id)?.nickname;
       this.player.performanceTools?.attachRemoteMicrophone(id, entry.source, this.player.context, nickname);
       this.updateConnections();
@@ -125,6 +126,7 @@ export class RemoteMicrophone {
     this.peers.delete(id);
     this.player?.performanceTools?.detachRemoteMicrophone(id);
     entry.source?.disconnect();
+    this.player?.mixer?.removeMicrophone?.(id);
     entry.pc.close();
     this.updateConnections();
   }

@@ -19,7 +19,8 @@ await esbuild.build({
 // Keep dashboard launch in the same document so its click unlocks TV audio.
 const dashboard = await fs.readFile("src/hosted/dashboard.html", "utf8");
 const appliance = await fs.readFile("src/hosted/index.html", "utf8");
-const dashboardContent = dashboard.match(/<main>([\s\S]*?)<\/main>/)[1];
+const dashboardContent = dashboard.match(/<main>([\s\S]*?)<\/main>/)?.[1];
+if (!dashboardContent) throw new Error("Dashboard is missing its main content");
 await fs.writeFile("dist/web/index.html", appliance
   .replace("<body>", '<body class="dashboard">')
   .replace("<main>", `<main><section id="dashboard">${dashboardContent}</section>`));
@@ -50,6 +51,6 @@ await fs.copyFile("LICENSE.txt", "dist/web/LICENSE.txt");
 await fs.copyFile("THIRD_PARTY_NOTICES.md", "dist/web/THIRD_PARTY_NOTICES.txt");
 // Ship the exact build inputs with every browser/container distribution.
 execFileSync("tar", ["-czf", "dist/web/source.tar.gz", "--exclude=.DS_Store", "--exclude=__pycache__",
-  "package.json", "package-lock.json", "tsconfig.server.json", "tsconfig.web.json", "build-server.mjs",
+  "package.json", "package-lock.json", "tsconfig.server.json", "tsconfig.web.json", "tsconfig.tools.json", "build-server.ts", "scripts",
   "eslint.config.js", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "README.md",
   "server", "shared", "src", "tests", "docs", "deploy/Dockerfile", "deploy/compose.yaml", "deploy/compose.gpu.yaml", "deploy/compose.local.yaml", "deploy/kubernetes.yaml", "deploy/Caddyfile"]);

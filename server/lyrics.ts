@@ -13,14 +13,20 @@ function* objects(value: unknown): Generator<Record<string, unknown>> {
 
 // Keep timestamps in the recording's timebase. Untimed text cannot be synced.
 export class YouTubeMusicLyrics implements LyricsProvider {
-  constructor(private request: typeof fetch = fetch) {}
+  constructor(private request: typeof fetch = fetch) { }
   private async api(endpoint: string, body: object, signal: AbortSignal, mobile = false): Promise<unknown> {
     const response = await this.request(`https://music.youtube.com/youtubei/v1/${endpoint}?alt=json`, {
       method: "POST", signal, redirect: "error",
       headers: { "Content-Type": "application/json", Origin: "https://music.youtube.com", Cookie: "SOCS=CAI" },
-      body: JSON.stringify({ ...body, context: { client: { hl: "en",
-        clientName: mobile ? "ANDROID_MUSIC" : "WEB_REMIX",
-        clientVersion: mobile ? "7.21.50" : `1.${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.01.00` } } }),
+      body: JSON.stringify({
+        ...body, context: {
+          client: {
+            hl: "en",
+            clientName: mobile ? "ANDROID_MUSIC" : "WEB_REMIX",
+            clientVersion: mobile ? "7.21.50" : `1.${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.01.00`
+          }
+        }
+      }),
     });
     requireValue(response.ok, "lyrics_unavailable", 502);
     const text = await response.text();
@@ -51,7 +57,7 @@ export class YouTubeMusicLyrics implements LyricsProvider {
 }
 
 export class Lyrics {
-  constructor(private providers: LyricsProvider[] = [new YouTubeMusicLyrics()]) {}
+  constructor(private providers: LyricsProvider[] = [new YouTubeMusicLyrics()]) { }
   async get(videoId: string, signal: AbortSignal): Promise<TimedLyrics | null> {
     for (const provider of this.providers) {
       if (signal.aborted) return null;
@@ -67,14 +73,14 @@ export class Lyrics {
 // Creator-provided captions use the exact video's clock, unlike matching a
 // different album recording by title. Never substitute auto-generated tracks.
 export class YouTubeCaptionLyrics implements LyricsProvider {
-  constructor(private binary = "yt-dlp", private run: JsonRunner = runJson, private request: typeof fetch = fetch) {}
+  constructor(private binary = "yt-dlp", private run: JsonRunner = runJson, private request: typeof fetch = fetch) { }
   async get(videoId: string, signal: AbortSignal): Promise<TimedLyrics | null> {
     requireValue(/^[\w-]{11}$/.test(videoId), "invalid_youtube_id");
     const metadata = await this.run(this.binary, ["--ignore-config", "--no-cache-dir", "--no-playlist", "--no-warnings",
       "--js-runtimes", "node", "--skip-download", "--dump-single-json", "--", `https://www.youtube.com/watch?v=${videoId}`], signal) as {
-      subtitles?: Record<string, { ext?: string; url?: string }[]>;
-      language?: string;
-    };
+        subtitles?: Record<string, { ext?: string; url?: string }[]>;
+        language?: string;
+      };
     const tracks = metadata.subtitles || {};
     const languages = [...new Set([metadata.language, "en", ...Object.keys(tracks)])];
     const track = languages.flatMap(language => language ? tracks[language] || [] : []).find(track => track.ext === "json3");

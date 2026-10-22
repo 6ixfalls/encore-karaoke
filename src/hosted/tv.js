@@ -14,14 +14,12 @@ export function mountTV() {
   $("room").append(shell);
   const stage = document.querySelector(".stage");
   shell.prepend(stage);
-  shell.querySelector(".tv-song-info").append($("playback-status"), $("now-title"), $("now-artist"));
-  shell.append($("pitch-staff"), $("microphone-inputs"));
-  const lastScore = document.createElement("p"); lastScore.id = "tv-last-score";
-  shell.querySelector(".tv-song-info").append(lastScore);
+  shell.querySelector(".tv-song-info").append($("now-title"), $("now-artist"));
+  shell.append($("pitch-staff"));
   const lyricSection = document.createElement("div");
   lyricSection.className = "player-bottom-section";
   lyricSection.append($("lyrics-canvas"));
-  shell.querySelector(".player-ui").append(lyricSection, $("score"));
+  shell.querySelector(".player-ui").append(lyricSection);
   shell.querySelector(".qr-image-wrapper").append($("qr"), $("manual-code"));
   $("progress").hidden = true;
   const settingsButton = document.createElement("button");
@@ -42,7 +40,15 @@ export function mountTV() {
   close.textContent = "Back to TV";
   close.addEventListener("click", () => settings.close());
   settingsButton.addEventListener("click", () => settings.showModal());
-  settings.append(title, close, $("display-controls"));
+  const debug = document.createElement("details"); debug.id = "tv-debug";
+  const debugTitle = document.createElement("summary"); debugTitle.textContent = "Debug";
+  const participants = document.createElement("ul"); participants.id = "connected-participants";
+  debug.append(debugTitle, $("connection"), $("playback-status"), $("performance-status"));
+  const microphones = document.createElement("details"); microphones.id = "tv-microphones";
+  const microphonesTitle = document.createElement("summary"); microphonesTitle.textContent = "Phones & singers";
+  const master = document.createElement("div"); master.id = "microphone-master";
+  microphones.append(microphonesTitle, master, participants, $("microphone-inputs"));
+  settings.append(title, close, microphones, $("display-controls"), debug);
   shell.append(settingsButton, settings);
   // Playback and song selection remain on the connected controllers.
   const controls = document.createElement("section");
@@ -59,8 +65,11 @@ export function mountTV() {
     shell.querySelector(".standby-screen").hidden = !!room.current;
     shell.querySelector(".player-ui").hidden = !room.current;
     shell.querySelector(".idle-hint").hidden = !!room.current;
-    const score = room.scores?.at(-1);
-    lastScore.textContent = score ? `${score.title} · ${score.inputs ? "Group" : score.nickname}: ${score.value} / 100` : "";
+    participants.replaceChildren(...room.participants.map(participant => {
+      const row = document.createElement("li");
+      row.textContent = `${participant.nickname || "Singer"} · ${participant.role === "guest" ? "Phone / controller" : "Display"}`;
+      return row;
+    }));
     $("tv-next").textContent = room.queue.map((song) => `${song.title} · ${song.artist || song.nickname}`).join(" / ") || "Choose your first song";
     const remotes = room.participants.filter((p) => p.role === "guest").length;
     $("tv-remote-count").textContent = remotes;

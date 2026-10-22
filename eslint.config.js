@@ -10,7 +10,6 @@ export default [
       "src/hosted/**/*.js",
       "src/platform/**/*.js",
       "tests/server/**/*.mjs",
-      "build-server.mjs",
       "eslint.config.js",
     ],
     languageOptions: {
@@ -25,7 +24,7 @@ export default [
   },
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
-    files: ["server/**/*.ts", "shared/**/*.ts", "src/hosted/**/*.ts"],
+    files: ["server/**/*.ts", "shared/**/*.ts", "src/hosted/**/*.ts", "scripts/**/*.ts", "build-server.ts"],
     languageOptions: {
       ...config.languageOptions,
       globals: { ...globals.node, ...globals.browser },

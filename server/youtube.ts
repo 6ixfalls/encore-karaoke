@@ -25,13 +25,15 @@ interface MusicMetadata { id: string; title?: string; track?: string; artist?: s
 function song(item: MusicMetadata) {
   const title = item.track || item.title;
   requireValue(typeof title === "string" && title.trim(), "youtube_invalid_response", 502);
-  return { videoId: item.id, title: title.slice(0, 200), artist: (item.artists?.join(", ") || item.artist || item.creator || item.channel || item.uploader || "Unknown artist").slice(0, 200),
-    ...(Number.isFinite(item.duration) && item.duration! > 0 ? { duration: item.duration } : {}) };
+  return {
+    videoId: item.id, title: title.slice(0, 200), artist: (item.artists?.join(", ") || item.artist || item.creator || item.channel || item.uploader || "Unknown artist").slice(0, 200),
+    ...(Number.isFinite(item.duration) && item.duration! > 0 ? { duration: item.duration } : {})
+  };
 }
 export class YouTube {
   private active = 0;
   private cache = new Map<string, { source: VideoSource; expires: number }>();
-  constructor(private binary = "yt-dlp", private run: JsonRunner = runJson, private request: typeof fetch = fetch) {}
+  constructor(private binary = "yt-dlp", private run: JsonRunner = runJson, private request: typeof fetch = fetch) { }
   private async json(args: string[], signal?: AbortSignal) {
     requireValue(this.active < 2, "youtube_busy", 503);
     this.active++;
@@ -83,8 +85,10 @@ export class YouTube {
     let url = new URL(source.url);
     for (let hop = 0; hop < 5; hop++) {
       this.validate(url);
-      const response = await this.request(url, { method: head ? "HEAD" : "GET", signal, redirect: "manual",
-        headers: { "User-Agent": source.userAgent, ...(range ? { Range: range } : {}) } });
+      const response = await this.request(url, {
+        method: head ? "HEAD" : "GET", signal, redirect: "manual",
+        headers: { "User-Agent": source.userAgent, ...(range ? { Range: range } : {}) }
+      });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         const target = response.headers.get("location");

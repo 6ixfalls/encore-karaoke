@@ -215,9 +215,11 @@ export function createApplication(store: Store, config: Configuration) {
     const session = participant(req);
     rooms.room(req.params.roomId, session);
     const job = separations.get(req.params.id, req.params.roomId, session.id);
-    res.json({ ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete,
+    res.json({
+      ...job.frames.snapshot(), state: job.state, complete: job.referenceComplete,
       mediaComplete: job.writer.writableFinished, ready: separations.playable(job),
-      lyrics: job.lyrics, lyricsPending: job.lyrics === undefined });
+      lyrics: job.lyrics, lyricsPending: job.lyrics === undefined
+    });
   });
   app.post("/api/rooms/:roomId/separation/:id/stop", (req, res) => {
     separations.stopOwned(req.params.id, req.params.roomId, participant(req).id);
@@ -377,7 +379,7 @@ export function createApplication(store: Store, config: Configuration) {
   io.on("connection", (socket) => {
     const handle = <T>(event: string, fn: (message: T, session: Session) => unknown) =>
       socket.on(event, (message, callback) => {
-        const reply = typeof callback === "function" ? callback : () => {};
+        const reply = typeof callback === "function" ? callback : () => { };
         try {
           reply(fn(message, socketSession(socket)));
         } catch (error) {
@@ -415,7 +417,7 @@ export function createApplication(store: Store, config: Configuration) {
       const display = room.lease.deviceId;
       requireValue(session.id !== target &&
         ((session.id === display && room.members[target]?.role === "guest") ||
-         (target === display && session.role === "guest")), "forbidden", 403);
+          (target === display && session.role === "guest")), "forbidden", 403);
       requireValue(!!message.description !== !!message.candidate);
       let payload;
       if (message.description) {
