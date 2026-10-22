@@ -29,15 +29,26 @@ test("microphone channels have independent levels and loopback, with a master th
   const original = globalThis.AudioWorkletNode;
   globalThis.AudioWorkletNode = class extends Node { parameters = new Map([["pitchFactor", new Parameter()], ["threshold", new Parameter()]]); };
   t.after(() => { if (original) globalThis.AudioWorkletNode = original; else delete globalThis.AudioWorkletNode; });
+  const compressors = [];
   const context = { currentTime: 10, audioWorklet: { addModule: async () => {} },
     createGain: () => new Node(),
     createBiquadFilter: () => Object.assign(new Node(), { frequency: new Parameter(), Q: new Parameter() }),
-    createDynamicsCompressor: () => Object.assign(new Node(), Object.fromEntries(["threshold", "ratio", "attack", "release", "knee"].map(k => [k, new Parameter()]))),
+    createDynamicsCompressor: () => {
+      const node = Object.assign(new Node(), Object.fromEntries(["threshold", "ratio", "attack", "release", "knee"].map(k => [k, new Parameter()])));
+      compressors.push(node); return node;
+    },
     createDelay: () => Object.assign(new Node(), { delayTime: new Parameter() }),
   };
   const source = new Node(), gate = new Node(), mixer = new AudioMixer(context, source, gate);
   mixer.apply({ ...defaults, micGain: .5 }); await mixer.initialize(); mixer.setLease(8);
   const first = mixer.microphoneInput("first"), second = mixer.microphoneInput("second");
+  assert.equal(reaches(first, compressors[2]), true);
+  mixer.apply({ ...defaults, compressor: false });
+  assert.equal(reaches(first, compressors[2]), false, "disabled compressor must bypass look-ahead processing");
+  assert.equal(reaches(first, gate), true);
+  assert.equal(reaches(first, mixer.capture), true);
+  mixer.apply({ ...defaults, micGain: .5 });
+  assert.equal(reaches(first, compressors[2]), true, "compressor can be enabled again");
   const level = (node, goal, seen = new Set()) => {
     if (seen.has(node)) return 0;
     if (node === goal) return node.gain?.value ?? 1;

@@ -13,6 +13,7 @@ class VocalStrip {
   private feedback: GainNode;
   private wet: GainNode;
   private noise?: AudioWorkletNode;
+  private compressing = true;
   constructor(private context: AudioContext, gate: GainNode) {
     this.input = context.createGain(); this.output = context.createGain();
     this.monitor = context.createGain(); this.monitor.gain.value = 0;
@@ -48,6 +49,15 @@ class VocalStrip {
     this.eq.forEach((filter, i) => set(filter.gain, settings.eq[i]));
     set(this.parametric.frequency, settings.parametricFrequency);
     set(this.parametric.gain, settings.parametricGain); set(this.parametric.Q, settings.parametricQ);
+    // A ratio of 1 still incurs the compressor's look-ahead delay. Bypass the
+    // node entirely when disabled, for both live monitoring and recording.
+    if (this.compressing !== settings.compressor) {
+      this.parametric.disconnect(); this.compressor.disconnect();
+      if (settings.compressor) {
+        this.parametric.connect(this.compressor); this.compressor.connect(this.gain);
+      } else this.parametric.connect(this.gain);
+      this.compressing = settings.compressor;
+    }
     set(this.compressor.threshold, settings.compressor ? settings.compressorThreshold : 0);
     set(this.compressor.ratio, settings.compressor ? 4 : 1);
     set(this.echo.delayTime, settings.echoTime); set(this.wet.gain, settings.echo); set(this.feedback.gain, .3);

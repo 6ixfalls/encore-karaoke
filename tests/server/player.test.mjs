@@ -936,6 +936,37 @@ test("ending media waits for the final streamed reference before submitting scor
   assert.equal(requests, 2);
 });
 
+test("a natural end shows a loading outro until the final guide and score arrive", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { player, service, reports } = fixture(t);
+  await player.initialize();
+  player.arm({ generation: "generation-1", leaseMs: 10000 }, performance.now());
+  player.loaded = "video";
+  player.audio.currentTime = 90;
+  player.separation = { id: "job", roomId: "room-1" };
+  const finished = [], score = { value: 85 };
+  player.finished = (...args) => finished.push(args);
+  let complete = false;
+  player.performanceTools = { updateLiveReference(snapshot) { complete = snapshot.complete; },
+    result: () => complete ? score : undefined };
+  let requests = 0;
+  service.request = async () => ({ complete: ++requests >= 3, mediaComplete: true, through: 90 });
+  player.report("ended");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0][4], true);
+  assert.equal(reports.some(report => report.state === "ended"), false);
+  t.mock.timers.tick(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finished.length, 1, "polls must not restart the loading outro");
+  t.mock.timers.tick(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finished.length, 2);
+  assert.equal(finished[1][1], score);
+  assert.equal(reports.at(-1).score, score);
+  player.performanceTools = null;
+});
+
 test("a growing buffer ending waits for finalized media and resumes instead of advancing the song", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { player, service, room, reports } = fixture(t);

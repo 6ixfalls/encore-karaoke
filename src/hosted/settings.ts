@@ -140,6 +140,14 @@ export function mountSettings(
   hint.textContent =
     "Tempo and key are on your phone’s Remote tab. Microphone effects apply to local and phone vocals. Loopback and individual microphone volumes are in Phones & singers.";
   sound.append(hint);
+  field(sound, "phoneMicBuffer", "Phone microphone buffer", [
+    ["0", "Minimum delay (default)"], ["auto", "Browser default"], ["10", "10 ms"],
+    ["20", "20 ms · low delay"], ["40", "40 ms · more stable"],
+  ]);
+  const latencyHint = document.createElement("p");
+  latencyHint.className = "muted";
+  latencyHint.textContent = "Minimum delay lets the browser use its smallest supported buffer. Increase the buffer if audio drops out. Turn Compressor off to reduce processing delay. Echo delay controls the intentional effect. Use wired speakers; Debug shows measured audio statistics.";
+  sound.append(latencyHint);
   for (const [index, frequency] of EQ_BANDS.entries()) {
     const label = document.createElement("label");
     label.textContent = `${frequency >= 1000 ? frequency / 1000 + "k" : frequency} Hz EQ (dB)`;

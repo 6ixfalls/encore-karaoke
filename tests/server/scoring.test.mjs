@@ -152,6 +152,24 @@ test("live references score queued microphone samples once data arrives and with
   assert.equal(tools.liveReference, null);
 });
 
+test("a completed guide drains microphone samples past the vocal EOF without blocking the final score", () => {
+  const tools = new PerformanceTools({ status() {}, score() {} });
+  tools.beginLiveReference();
+  const input = new InputScore({ id: "local", label: "Display", source: "display" }, tools.reference, 0);
+  tools.inputScores.set("local", input);
+  for (let frame = 1; frame <= 81; frame++) input.update(frame * .05, 440, 0, 1, tools.liveReference);
+  const snapshot = { pitches: Array(173).fill(440), step: 1024 / 44100, through: 4, singable: 4 };
+  tools.updateLiveReference({ ...snapshot, complete: false });
+  assert.equal(input.pending.length, 1);
+  assert.equal(tools.result(), undefined);
+  tools.updateLiveReference({ ...snapshot, complete: true });
+  assert.equal(input.pending.length, 0);
+  assert.equal(tools.result().value, 100);
+  const earned = input.referenceScore.scorer.earned;
+  tools.updateLiveReference({ ...snapshot, complete: true });
+  assert.equal(input.referenceScore.scorer.earned, earned, "final snapshots cannot award credit twice");
+});
+
 for (const mode of ["guide", "stability", "live"]) {
   test(`phone audio produces a final ${mode} score without a TV microphone or pitch graph`, async () => {
     const tools = new PerformanceTools({ status() {}, score() {}, recording() {} });

@@ -14,10 +14,14 @@
 #song-results .score-unavailable-reason { max-width: 44rem; margin: 0 1.5rem 3rem; text-align: center; font-size: clamp(1rem, 2vw, 1.5rem); line-height: 1.5; color: #ddd; }
 #song-results .rank-display-text { font-size: clamp(1.5rem, 5vw, 6rem); text-align: center; }
 #song-results.visible { opacity: 1; pointer-events: auto; }
+@starting-style { #song-results.visible { opacity: 0; } }
 #song-results { box-sizing: border-box; padding: 2rem 1rem 5rem; overflow-y: auto; }
 #song-results .score-title-text { font-size: clamp(1.5rem, 4vw, 3.5rem); text-align: center; }
 #song-results .score-display-number { font-size: clamp(5rem, 19vh, 12rem); }
 #song-results .score-main-group { margin-bottom: 2vh; flex-shrink: 0; }
+#song-results.score-pending .score-main-group::before { content: ""; display: block; width: 4rem; height: 4rem; border: .3rem solid #ffffff25; border-top-color: #89cff0; border-radius: 50%; animation: score-loading 1s linear infinite; }
+@keyframes score-loading { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #song-results.score-pending .score-main-group::before { animation: none; } }
 #song-results .score-input-results { width: min(44rem, 90vw); max-height: 28vh; flex-shrink: 0; overflow-y: auto; }
 #song-results .score-input-row { display: grid; grid-template-columns: 1fr auto; gap: .4rem 1rem; padding: .65rem 1rem; margin: .5rem 0; border-left: 4px solid var(--input-color); background: #ffffff0a; }
 #song-results .score-input-row span { color: var(--input-color); overflow-wrap: anywhere; }

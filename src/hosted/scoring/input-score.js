@@ -34,7 +34,9 @@ export class InputScore {
   flush(reference) {
     if (!this.referenceScore) return;
     this.referenceScore.scorer.totalSingable = Math.max(.5, reference.duration);
-    while (this.pending.length && this.pending[0].time <= reference.through) {
+    // Completed guides cannot grow further. Drain the codec/polling tail too;
+    // reference.at() treats positions beyond the guide as silence.
+    while (this.pending.length && (reference.complete || this.pending[0].time <= reference.through)) {
       const sample = this.pending.shift();
       this.referenceScore.update(sample.time, sample.hz, sample.latency, sample.rate);
     }

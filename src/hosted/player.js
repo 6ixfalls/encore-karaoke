@@ -285,19 +285,27 @@ export class BrowserPlayer {
           if (this.separation !== job || this.loaded !== playbackId || !this.valid()) return;
           this.referenceSnapshot = snapshot;
           this.performanceTools?.updateLiveReference?.(snapshot);
-          if (snapshot.complete === false || snapshot.mediaComplete === false) {
-            this.separationTimer = setTimeout(finish, 1000);
-            return;
-          }
           const seek = this.playbackSeek();
           // A growing response may expose a temporary duration. Only trust the
           // media duration after reopening the finalized file.
           const duration = this.seekReloaded && Number.isFinite(this.audio.duration) && this.audio.duration > 0
             ? this.audio.duration : snapshot.through;
-          if (duration > endPosition + .25 || seek && seek.id !== this.seekId) {
+          const recover = duration > endPosition + .25 || seek && seek.id !== this.seekId;
+          // Only show the outro once finalized media confirms a natural end,
+          // rather than a temporary EOF in the growing stream.
+          if (snapshot.mediaComplete !== false && !recover && !job.waitingForScore) {
+            job.waitingForScore = true;
+            this.finished?.(this.room.current, undefined, undefined, [], true);
+          }
+          if (snapshot.complete === false || snapshot.mediaComplete === false) {
+            this.separationTimer = setTimeout(finish, 1000);
+            return;
+          }
+          if (recover) {
             // A growing MP4 can emit ended at its current buffer edge. Reopen
             // the completed file and seek back before allowing normal playback.
             job.finishing = false;
+            job.waitingForScore = false;
             this.recoverySeek = { id: `recovery:${this.loadingVersion}:${endPosition}`,
               commandId: this.room?.current?.seek?.id,
               position: seek && seek.id !== this.seekId ? seek.position : endPosition };

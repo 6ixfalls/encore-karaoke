@@ -29,6 +29,8 @@ export interface Preferences {
   echo: number;
   echoTime: number;
   noiseGate: number;
+  phoneMicLowLatency: boolean;
+  phoneMicBuffer: string;
 }
 export const defaults: Preferences = {
   startupIntro: true, songIntro: true, celebrations: true, fanfare: true,
@@ -40,6 +42,7 @@ export const defaults: Preferences = {
   micGain: 1, monitoring: false, eq: [0, 0, 0, 0, 0, 0, 0],
   parametricFrequency: 1000, parametricGain: 0, parametricQ: 1,
   compressor: true, compressorThreshold: -24, echo: 0, echoTime: .25, noiseGate: -50,
+  phoneMicLowLatency: true, phoneMicBuffer: "0",
 };
 const ranges: Partial<Record<keyof Preferences, [number, number]>> = {
   lyricSize: [.5, 2], lyricGap: [.5, 2], lyricMargin: [0, 150], lyricOffset: [-5000, 5000],
@@ -49,6 +52,7 @@ const ranges: Partial<Record<keyof Preferences, [number, number]>> = {
   echo: [0, .7], echoTime: [.05, .8], noiseGate: [-100, -10],
 };
 const choices: Partial<Record<keyof Preferences, string[]>> = {
+  phoneMicBuffer: ["0", "auto", "10", "20", "40"],
   lyricFont: ["Radio Canada", "Rajdhani", "Noto Sans JP", "Noto Sans KR", "Noto Sans SC"],
   lyricCase: ["original", "uppercase", "lowercase", "sentence"],
   lyricAlignment: ["center", "left", "right", "alternating", "split"],

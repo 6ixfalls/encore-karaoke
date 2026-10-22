@@ -79,6 +79,46 @@ test("skipping results cancels delayed fanfare and narration during the fade", a
   t.mock.timers.tick(200);
   assert.equal(presentation.results.hidden, true);
 });
+
+test("the outro waits without timing out and reveals the final score without restarting its fade", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const element = () => ({ hidden: true, textContent: "", style: {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
+  let resets = 0;
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    preferences: { celebrations: true }, player: { valid: () => true },
+    results: element(), scoreTitle: element(), scoreNumber: element(), scoreStatus: element(),
+    rank: element(), leaderboard: element(), inputResults: element(),
+    skip() { resets++; }, hideStage() {},
+  });
+  const song = { playbackId: "song", title: "Song" };
+  presentation.finish(song, undefined, undefined, [], true);
+  assert.equal(presentation.results.hidden, false);
+  assert.equal(presentation.rank.textContent, "");
+  assert.equal(presentation.scoreStatus.textContent, "Calculating your score…");
+  assert.equal(presentation.resultTimer, undefined);
+  t.mock.timers.tick(20000);
+  assert.equal(presentation.results.hidden, false);
+  presentation.finish(song, { value: 80 });
+  assert.equal(resets, 1, "keep the overlay visible when the score becomes ready");
+  assert.equal(presentation.resultPending, false);
+  assert.equal(presentation.scoreStatus.hidden, true);
+  assert.equal(presentation.scoreNumber.textContent, "0");
+  assert.ok(presentation.resultTimer, "start the celebration timeout only after the score arrives");
+});
+
+test("skipping a pending outro prevents a late score from reopening it", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const presentation = Object.assign(Object.create(Presentation.prototype), {
+    preferences: { celebrations: true }, player: { valid: () => true },
+    results: { hidden: false, classList: { remove() {} } },
+    resultPending: true, resultSong: { playbackId: "song" }, stopSound() {}, resume() {},
+  });
+  presentation.skip();
+  t.mock.timers.tick(400);
+  presentation.finish({ playbackId: "song", title: "Song" }, { value: 80 });
+  assert.equal(presentation.results.hidden, true);
+  assert.equal(presentation.player.resultsUntil, 0);
+});
 test("vocal countdowns and interludes follow cue gaps and rewind without timers", () => {
   assert.deepEqual(gapPresentation([], 0), { countdown: null, interlude: false });
   assert.equal(gapPresentation(cues, 7).countdown, 3);

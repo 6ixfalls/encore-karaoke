@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { requestMicrophone } from "../../src/hosted/microphone.js";
 import { RemoteMicrophone } from "../../src/hosted/remote-microphone.js";
+import { lowLatencyDescription, tuneMicrophoneReceiver, preferOpus } from "../../src/hosted/microphone-latency.js";
+import { audioLatencyStats } from "../../src/hosted/microphone-diagnostics.js";
+import { defaults, validatePreferences } from "../../src/hosted/preferences.ts";
 
 function fixture(t, capture) {
   const descriptors = Object.fromEntries(["navigator", "document", "isSecureContext"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -37,6 +40,62 @@ test("saved microphone denial gives recovery steps without retrying capture", as
     return true;
   });
   assert.equal(attempts, 1);
+});
+
+test("phone capture requests unprocessed mono audio without changing local capture", async t => {
+  const requests = [];
+  fixture(t, async constraints => { requests.push(constraints); return {}; });
+  await requestMicrophone(false, true);
+  await requestMicrophone(false);
+  assert.deepEqual(requests[0], { audio: {
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+    channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 }, latency: { ideal: 0 },
+  }, video: false });
+  assert.deepEqual(requests[1].audio, { echoCancellation: true, noiseSuppression: true, autoGainControl: false });
+});
+
+test("Opus packet preferences preserve payload IDs, FEC and unrelated SDP sections", () => {
+  const session = "v=0\r\ns=-\r\n";
+  const audio = "m=audio 9 UDP/TLS/RTP/SAVPF 111 0\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1\r\na=ptime:20\r\na=maxptime:60\r\n";
+  const video = "m=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n";
+  const description = { type: "answer", sdp: session + audio + video };
+  const tuned = lowLatencyDescription(description);
+  assert.equal(tuned.type, "answer");
+  assert.equal(tuned.sdp, session + audio.replace("a=ptime:20", "a=ptime:10").replace("a=maxptime:60", "a=maxptime:10") + video);
+  assert.deepEqual(lowLatencyDescription(tuned), tuned);
+  const fallback = { type: "answer", sdp: "m=audio 9 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n" };
+  assert.deepEqual(lowLatencyDescription(fallback), fallback);
+});
+
+test("receiver buffering hints tolerate unsupported and rejecting browsers", () => {
+  const modern = { jitterBufferTarget: null, playoutDelayHint: null };
+  tuneMicrophoneReceiver(modern);
+  assert.equal(modern.jitterBufferTarget, 0);
+  assert.equal(modern.playoutDelayHint, null);
+  const legacy = { playoutDelayHint: null };
+  tuneMicrophoneReceiver(legacy);
+  assert.equal(legacy.playoutDelayHint, 0);
+  tuneMicrophoneReceiver(legacy, null);
+  assert.equal(legacy.playoutDelayHint, null);
+  const unsupported = {};
+  tuneMicrophoneReceiver(unsupported);
+  assert.deepEqual(unsupported, {});
+  assert.doesNotThrow(() => tuneMicrophoneReceiver({ set jitterBufferTarget(value) { throw new Error(String(value)); } }));
+  assert.doesNotThrow(() => tuneMicrophoneReceiver());
+});
+
+test("Opus preference retains fallback codecs and tolerates unsupported preferences", t => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "RTCRtpReceiver");
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, "RTCRtpReceiver", descriptor); else delete globalThis.RTCRtpReceiver;
+  });
+  const pcmu = { mimeType: "audio/PCMU" }, opus = { mimeType: "audio/opus" };
+  globalThis.RTCRtpReceiver = { getCapabilities: () => ({ codecs: [pcmu, opus] }) };
+  let preferred;
+  preferOpus({ setCodecPreferences: codecs => { preferred = codecs; } });
+  assert.deepEqual(preferred, [opus, pcmu]);
+  assert.doesNotThrow(() => preferOpus({}));
+  assert.doesNotThrow(() => preferOpus({ setCodecPreferences() { throw new Error("unsupported"); } }));
 });
 
 test("insecure contexts and page policy blocks are diagnosed before capture", async t => {
@@ -153,7 +212,9 @@ test("received phone audio attaches to the display scorer with its participant l
     detachRemoteMicrophone() {}, attachRemoteMicrophone: (...args) => attached.push(args),
   } };
   const { pc } = mic.peer("phone");
-  pc.ontrack({ track: { kind: "audio", addEventListener() {} }, streams: [stream] });
+  const receiver = { jitterBufferTarget: null };
+  pc.ontrack({ track: { kind: "audio", addEventListener() {} }, streams: [stream], receiver });
+  assert.equal(receiver.jitterBufferTarget, 0);
   assert.equal(connected[0], mic.player.gate);
   assert.deepEqual(attached[0], ["phone", source, context, "Alex"]);
   assert.equal(receivers[0].srcObject, stream);
@@ -166,4 +227,64 @@ test("received phone audio attaches to the display scorer with its participant l
   mic.closePeer("phone");
   assert.equal(receivers[1].srcObject, null);
   assert.equal(paused, 2);
+});
+
+test("display answer negotiates short packets before signaling the phone", async t => {
+  fixture(t, async () => {});
+  const mic = new RemoteMicrophone({ tv: true, status() {} });
+  mic.player = { valid: () => true };
+  const answer = { type: "answer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" };
+  let sent;
+  const pc = {
+    async setRemoteDescription(value) { this.remoteDescription = value; },
+    async createAnswer() { return answer; },
+    async setLocalDescription(value) { this.localDescription = { toJSON: () => value }; },
+  };
+  mic.peer = () => ({ pc, candidates: [] });
+  mic.signal = async (target, data) => { sent = { target, ...data }; };
+  await mic.receive({ from: "phone", description: { type: "offer", sdp: answer.sdp } });
+  assert.equal(sent.target, "phone");
+  assert.equal(sent.description.type, "answer");
+  assert.match(sent.description.sdp, /a=ptime:10\r\na=maxptime:10\r\n/);
+});
+
+test("buffer choices update active receivers and can restore browser defaults", () => {
+  const mic = new RemoteMicrophone({ tv: true, status() {} });
+  const receiver = { jitterBufferTarget: 20 };
+  mic.peers.set("phone", { receiver });
+  for (const value of ["0", "10", "20", "40"]) {
+    mic.setBufferTarget(value);
+    assert.equal(receiver.jitterBufferTarget, Number(value));
+  }
+  mic.setBufferTarget("auto");
+  assert.equal(receiver.jitterBufferTarget, null);
+  mic.setBufferTarget("-1");
+  assert.equal(receiver.jitterBufferTarget, null);
+  assert.equal(validatePreferences({ phoneMicBuffer: "40", phoneMicLowLatency: false }).phoneMicBuffer, "40");
+  assert.equal(validatePreferences({ phoneMicLowLatency: false }).phoneMicLowLatency, false);
+  assert.equal(validatePreferences({ phoneMicBuffer: "bad" }).phoneMicBuffer, defaults.phoneMicBuffer);
+});
+
+test("audio diagnostics report measured buffer averages, loss and selected route without inventing missing values", () => {
+  const stats = new Map([
+    ["audio", { type: "inbound-rtp", kind: "audio", codecId: "codec", jitter: .004,
+      jitterBufferDelay: 2, jitterBufferTargetDelay: 1, jitterBufferEmittedCount: 100,
+      packetsReceived: 500, packetsLost: 3, concealedSamples: 24 }],
+    ["video", { type: "inbound-rtp", kind: "video" }],
+    ["codec", { mimeType: "audio/opus" }],
+    ["transport", { type: "transport", selectedCandidatePairId: "pair" }],
+    ["pair", { type: "candidate-pair", currentRoundTripTime: .006, localCandidateId: "local", remoteCandidateId: "remote" }],
+    ["local", { candidateType: "host" }],
+    ["remote", { candidateType: "host" }],
+  ]);
+  assert.deepEqual(audioLatencyStats(stats), [{ codec: "audio/opus", jitterMs: 4,
+    averageBufferMs: 20, averageTargetBufferMs: 10, packetsReceived: 500, packetsLost: 3,
+    concealedSamples: 24, roundTripMs: 6, relayed: false }]);
+  stats.set("local", { candidateType: "relay" });
+  assert.equal(audioLatencyStats(stats)[0].relayed, true);
+  const missing = audioLatencyStats(new Map([["audio", { type: "inbound-rtp", mediaType: "audio", jitterBufferEmittedCount: 0 }]]))[0];
+  assert.equal(missing.averageBufferMs, null);
+  assert.equal(missing.roundTripMs, null);
+  assert.equal(missing.packetsLost, null);
+  assert.equal(missing.relayed, null);
 });

@@ -1,4 +1,5 @@
 import { requestMicrophone } from "./microphone.js";
+import { lowLatencyDescription, tuneMicrophoneReceiver, preferOpus } from "./microphone-latency.js";
 
 // Signaling stays on the authenticated room connection; audio travels over WebRTC.
 export class RemoteMicrophone {
@@ -6,6 +7,12 @@ export class RemoteMicrophone {
     Object.assign(this, { tv, status, level, connections });
     this.peers = new Map();
     this.version = 0;
+    this.bufferTarget = 0;
+  }
+  setBufferTarget(value) {
+    if (!["0", "auto", "10", "20", "40"].includes(value)) return;
+    this.bufferTarget = value === "auto" ? null : Number(value);
+    for (const { receiver } of this.peers.values()) tuneMicrophoneReceiver(receiver, this.bufferTarget);
   }
   connect(socket, getRoom, player) {
     this.stop();
@@ -39,8 +46,10 @@ export class RemoteMicrophone {
         this.updateConnections();
       }
     };
-    pc.ontrack = ({ track, streams }) => {
+    pc.ontrack = ({ track, streams, receiver }) => {
       if (this.peers.get(id) !== entry || !this.tv || track.kind !== "audio" || !this.player.valid()) return;
+      entry.receiver = receiver;
+      tuneMicrophoneReceiver(receiver, this.bufferTarget);
       this.player.performanceTools?.detachRemoteMicrophone(id);
       entry.source?.disconnect();
       this.releaseReceiver(entry);
@@ -76,7 +85,8 @@ export class RemoteMicrophone {
       await pc.setRemoteDescription(description);
       for (const ice of entry.candidates.splice(0)) await pc.addIceCandidate(ice);
       if (description.type === "offer" && this.tv) {
-        await pc.setLocalDescription(await pc.createAnswer());
+        for (const transceiver of pc.getTransceivers?.() || []) preferOpus(transceiver);
+        await pc.setLocalDescription(lowLatencyDescription(await pc.createAnswer()));
         await this.signal(from, { description: pc.localDescription.toJSON() });
       }
     } else if (candidate) {
@@ -84,13 +94,13 @@ export class RemoteMicrophone {
       else entry.candidates.push(candidate);
     }
   }
-  async start() {
+  async start({ lowLatency = true } = {}) {
     this.stop();
     const version = this.version;
     const room = this.getRoom();
     if (!this.socket?.connected || !room?.lease || room.lease.retired || room.lease.releaseRequested)
       throw new Error("TV audio is not ready. Tap a TV control before enabling your microphone.");
-    const stream = await requestMicrophone(false);
+    const stream = await requestMicrophone(false, lowLatency);
     if (version !== this.version) { stream.getTracks().forEach((track) => track.stop()); return false; }
     this.stream = stream;
     this.target = room.lease.deviceId;
@@ -102,7 +112,8 @@ export class RemoteMicrophone {
       }, { once: true }));
       this.startMeter(stream);
       for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
-      await pc.setLocalDescription(await pc.createOffer());
+      for (const transceiver of pc.getTransceivers?.() || []) preferOpus(transceiver);
+      await pc.setLocalDescription(lowLatencyDescription(await pc.createOffer()));
       await this.signal(this.target, { description: pc.localDescription.toJSON() });
       this.status("Connecting microphone…");
       this.timeout = setTimeout(() => {
@@ -112,7 +123,7 @@ export class RemoteMicrophone {
     } catch (error) { this.stop(); throw error; }
   }
   startMeter(stream) {
-    const context = this.meterContext = new AudioContext();
+    const context = this.meterContext = new AudioContext({ latencyHint: "interactive" });
     this.meterSource = context.createMediaStreamSource(stream);
     const analyser = this.meterAnalyser = context.createAnalyser();
     analyser.fftSize = 256;

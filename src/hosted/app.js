@@ -5,6 +5,7 @@ import { PerformanceTools } from "./performance.js";
 import { mountTV } from "./tv.js";
 import { mountController } from "./controller.js";
 import { RemoteMicrophone } from "./remote-microphone.js";
+import { mountLatencyDiagnostics } from "./microphone-diagnostics.js";
 import { youtubeId } from "./youtube.js";
 import { HostedLyrics } from "./lyrics.js";
 import { Presentation } from "./presentation.js";
@@ -111,7 +112,7 @@ const player = new BrowserPlayer(services, {
     const mixer = new AudioMixer(context, source, gate); mixer.apply(preferences); return mixer;
   },
   trackReady: (song) => presentation?.prepare(song) || 0,
-  finished: (song, score, reason, inputs) => presentation?.finish(song, score, reason, inputs),
+  finished: (song, score, reason, inputs, pending) => presentation?.finish(song, score, reason, inputs, pending),
   media: $("local-media"), performance: performanceTools,
   telemetry: (data) => {
     if (socket?.connected)
@@ -139,12 +140,15 @@ const player = new BrowserPlayer(services, {
   },
 });
 function mountPresentation() {
+  remoteMicrophone.setBufferTarget(preferences.phoneMicBuffer);
+  mountLatencyDiagnostics($("tv-debug"), remoteMicrophone);
   presentation = new Presentation($("tv-appliance"), preferences, player, () => player.update(room).catch(showError));
   presentation.startup();
   const refreshMaster = mountMicrophoneMaster($("microphone-master"), preferences, () => {
     savePreferences(preferences); player.mixer?.apply(preferences);
   });
   mountSettings($("display-controls"), preferences, async () => {
+    remoteMicrophone.setBufferTarget(preferences.phoneMicBuffer);
     refreshMaster();
     lyricRenderer?.configure(preferences);
     if (player.mixer) { await player.mixer.initialize(); player.mixer.apply(preferences); }
@@ -476,12 +480,18 @@ $("invite").addEventListener(
   "click",
   run(() => invite()),
 );
+const phoneMicLowLatency = $("remote-mic-low-latency");
+phoneMicLowLatency.checked = preferences.phoneMicLowLatency;
+phoneMicLowLatency.addEventListener("change", () => {
+  preferences.phoneMicLowLatency = phoneMicLowLatency.checked;
+  savePreferences(preferences);
+});
 $("remote-mic-start").addEventListener("click", async () => {
   const start = $("remote-mic-start");
   start.disabled = true;
   $("remote-mic-status").textContent = "Requesting microphone access…";
   try {
-    if (await remoteMicrophone.start()) {
+    if (await remoteMicrophone.start({ lowLatency: preferences.phoneMicLowLatency })) {
       $("remote-mic-stop").hidden = false;
       start.hidden = true;
     }

@@ -1,6 +1,6 @@
 // Keep the capture request in the button's activation; do not await a permission
 // query first. Browsers retain the choice and may deny without another prompt.
-export async function requestMicrophone(autoGainControl = true) {
+export async function requestMicrophone(autoGainControl = true, lowLatency = false) {
   if (globalThis.isSecureContext === false)
     throw new Error("Microphone access requires a trusted HTTPS connection. Open EnMoku at its HTTPS address.");
   const policy = globalThis.document?.permissionsPolicy || globalThis.document?.featurePolicy;
@@ -10,7 +10,10 @@ export async function requestMicrophone(autoGainControl = true) {
     throw new Error("Microphone capture is unavailable. Open EnMoku directly in a browser using trusted HTTPS.");
   try {
     return await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl }, video: false,
+      audio: lowLatency ? {
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 }, latency: { ideal: 0 },
+      } : { echoCancellation: true, noiseSuppression: true, autoGainControl }, video: false,
     });
   } catch (error) {
     let message;

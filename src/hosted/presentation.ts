@@ -64,6 +64,8 @@ export class Presentation {
   private resultStarted = 0;
   private resultScore?: Score;
   private resultSong?: SongInfo;
+  private resultPending = false;
+  private dismissedResult?: string;
   private lastTipTarget?: number;
   private buffers = new Map<string, Promise<AudioBuffer>>();
   private sound?: AudioBufferSourceNode;
@@ -197,6 +199,8 @@ export class Presentation {
       this.hideStage(); if (this.wasValid) this.skip(); return;
     }
     this.wasValid = true;
+    if (this.resultPending && (song?.playbackId !== this.resultSong?.playbackId ||
+        this.player.loaded !== this.resultSong?.playbackId || !this.player.audio.paused)) this.skip(false);
     this.updateResult();
     const active = song && this.player.loaded === song.playbackId && !this.player.loading;
     if (!active) { this.hideStage(); return; }
@@ -221,14 +225,28 @@ export class Presentation {
     if (this.introWasShown) this.showIntro(song);
     return this.introWasShown ? 2900 : 0;
   }
-  finish(song: SongInfo, score?: Score, reason?: string, inputs: InputScoreResult[] = score?.inputs || []): void {
+  finish(song: SongInfo, score?: Score, reason?: string, inputs: InputScoreResult[] = score?.inputs || [], pending = false): void {
     if (!this.preferences.celebrations || !this.player.valid()) return;
-    this.skip(false); this.resultSong = song; this.resultScore = score;
+    if (this.dismissedResult === song.playbackId) { this.player.resultsUntil = 0; return; }
+    const reveal = this.resultPending && this.resultSong?.playbackId === song.playbackId;
+    if (!reveal) this.skip(false);
+    this.resultPending = pending; this.resultSong = song; this.resultScore = score;
     this.resultStarted = performance.now(); this.results.hidden = false;
     this.results.classList.remove("show-leaderboard"); this.results.classList.add("visible");
+    this.results.setAttribute?.("aria-busy", String(pending));
     this.scoreTitle.textContent = inputs.length ? "GROUP SCORE" : song.nickname ? `${song.nickname.toUpperCase()}'S SCORE` : "YOUR SCORE";
     this.inputResults.replaceChildren();
     this.inputResults.hidden = !inputs.length;
+    this.results.classList.remove("score-pending");
+    if (pending) {
+      this.results.classList.add("score-pending");
+      this.scoreNumber.textContent = ""; this.rank.textContent = "";
+      this.scoreStatus.hidden = false;
+      this.scoreStatus.textContent = "Calculating your score…";
+      this.leaderboard.classList.add("hidden");
+      this.hideStage();
+      return;
+    }
     if (inputs.length) {
       this.inputResults.append(node("p", "score-group-method", "Group = average of available microphone scores. Each microphone is scored against the full song."));
       for (const input of inputs) {
@@ -268,6 +286,7 @@ export class Presentation {
   private updateResult(): void {
     if (this.results.hidden || this.resultExitTimer !== undefined || !this.resultSong) return;
     if (!this.preferences.celebrations) { this.skip(); return; }
+    if (this.resultPending) return;
     const elapsed = performance.now() - this.resultStarted;
     if (this.resultScore) {
       const s = Math.floor(this.resultScore.value), progress = Math.min(1, elapsed / 3800);
@@ -314,6 +333,8 @@ export class Presentation {
   }
   skip(resume = true): void {
     if (resume && this.resultExitTimer !== undefined) return;
+    if (resume && this.resultPending) this.dismissedResult = this.resultSong?.playbackId;
+    this.resultPending = false;
     const hadResult = !this.results.hidden;
     clearTimeout(this.startupTimer); clearTimeout(this.resultTimer); clearTimeout(this.resultExitTimer);
     this.resultExitTimer = undefined;

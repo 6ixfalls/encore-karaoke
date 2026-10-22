@@ -48,7 +48,7 @@
         <div id="rooms" class="cards"></div>
       </section>
       <section id="room" hidden>
-        <section id="remote-microphone" class="card" hidden><h2>Microphone</h2><div id="remote-mic-level" class="mic-level" role="meter" aria-label="Microphone volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="mic-level-fill" aria-hidden="true"></span></div><p class="mic-level-label">Microphone volume</p><button id="remote-mic-start">Enable phone microphone</button><button id="remote-mic-stop" hidden>Turn microphone off</button><p id="remote-mic-status" role="status">Use headphones or keep your phone away from the TV speakers.</p></section>
+        <section id="remote-microphone" class="card" hidden><h2>Microphone</h2><div id="remote-mic-level" class="mic-level" role="meter" aria-label="Microphone volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="mic-level-fill" aria-hidden="true"></span></div><p class="mic-level-label">Microphone volume</p><label><input id="remote-mic-low-latency" type="checkbox" checked /> Low-delay capture</label><p class="muted">Disables echo cancellation and noise suppression. Keep the phone away from speakers. Turn off if you hear feedback or backing-track bleed. Changes apply next time you enable the microphone.</p><button id="remote-mic-start">Enable phone microphone</button><button id="remote-mic-stop" hidden>Turn microphone off</button><p id="remote-mic-status" role="status">Use headphones or keep your phone away from the TV speakers.</p></section>
         <div class="room-heading">
           <div>
             <p class="eyebrow">CONNECTED TO</p>
