@@ -68,6 +68,16 @@ test("microphone channels have independent levels and loopback, with a master th
   assert.equal(level(reconnected, gate), 1.2);
   mixer.setMicrophoneSettings("second", { volume: -1, loopback: true });
   assert.equal(level(reconnected, gate), 1.2);
+  mixer.setMicrophoneSettings("first", { volume: 0, loopback: false });
+  mixer.setMicrophoneSettings("disconnected", { volume: 0, loopback: false });
+  mixer.resetMicrophoneSettings();
+  assert.deepEqual(mixer.getMicrophoneSettings("local"), { volume: 1, loopback: defaults.monitoring });
+  assert.equal(level(mixer.localInput, gate), 0);
+  assert.equal(level(first, gate), defaults.micGain);
+  assert.equal(level(reconnected, gate), defaults.micGain);
+  assert.equal(level(mixer.microphoneInput("disconnected"), gate), defaults.micGain);
+  assert.equal(level(first, mixer.capture), defaults.micGain);
+  assert.equal(level(source, gate), 1);
   mixer.setLease(0);
   assert.equal(level(first, mixer.capture), 0);
 });

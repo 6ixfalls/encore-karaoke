@@ -148,7 +148,7 @@ function mountPresentation() {
     refreshMaster();
     lyricRenderer?.configure(preferences);
     if (player.mixer) { await player.mixer.initialize(); player.mixer.apply(preferences); }
-  }, showError);
+  }, showError, () => player.mixer?.resetMicrophoneSettings());
   $("tv-settings-title").textContent = "Encore settings";
 }
 if (tv) mountPresentation();

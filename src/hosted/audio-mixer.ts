@@ -124,6 +124,10 @@ export class AudioMixer {
   removeMicrophone(id: string): void {
     this.microphones.get(id)?.dispose(); this.microphones.delete(id);
   }
+  resetMicrophoneSettings(): void {
+    this.microphoneSettings.clear();
+    if (this.settings) this.apply(this.settings);
+  }
   getMicrophoneSettings(id: string): { volume: number; loopback: boolean } {
     return this.microphoneSettings.get(id) || { volume: 1, loopback: id === "local" ? !!this.settings?.monitoring : true };
   }

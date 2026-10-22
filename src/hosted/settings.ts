@@ -5,6 +5,7 @@ export function mountSettings(
   preferences: Preferences,
   apply: (preferences: Preferences) => Promise<void> | void,
   error: (error: Error) => void,
+  resetMixer: () => void = () => {},
 ): void {
   const form = document.createElement("div");
   form.className = "encore-settings";
@@ -207,8 +208,9 @@ export function mountSettings(
   reset.textContent = "Reset presentation, lyrics & mixer";
   reset.addEventListener("click", () => {
     Object.assign(preferences, structuredClone(defaults));
+    resetMixer();
     form.remove();
-    mountSettings(container, preferences, apply, error);
+    mountSettings(container, preferences, apply, error, resetMixer);
     changed();
   });
   form.append(reset);
